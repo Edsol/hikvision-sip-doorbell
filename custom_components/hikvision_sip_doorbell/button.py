@@ -75,3 +75,5 @@ class SimulateRingButton(ButtonEntity):
         self._coordinator.call_state = "ringing"
         self._coordinator.async_update_listeners()
         await self._coordinator._async_originate()
+        self._coordinator.call_state = "idle"
+        self._coordinator.async_update_listeners()
