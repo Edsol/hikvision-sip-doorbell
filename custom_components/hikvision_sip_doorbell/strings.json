@@ -1,47 +1,5 @@
 {
   "entity": {
-    "sensor": {
-      "behavior_at_home_registered": {
-        "state": {
-          "at_home_registered": "Will ring indoor extension {extension}."
-        }
-      },
-      "behavior_at_home_fallback_wait": {
-        "state": {
-          "at_home_fallback_wait": "Indoor extension {extension} not registered. Will ring anyway and wait {wait_s}s."
-        }
-      },
-      "behavior_at_home_fallback_call_external": {
-        "state": {
-          "at_home_fallback_call_external": "Indoor extension {extension} not registered. Will call {phone} ({label})."
-        }
-      },
-      "behavior_at_home_fallback_call_external_no_number": {
-        "state": {
-          "at_home_fallback_call_external_no_number": "Indoor extension {extension} not registered. Fallback is call external but no number set in {label}."
-        }
-      },
-      "behavior_at_home_fallback_none": {
-        "state": {
-          "at_home_fallback_none": "Indoor extension {extension} not registered. Call will be ignored."
-        }
-      },
-      "behavior_external_ok": {
-        "state": {
-          "external_ok": "Will call {phone} ({label}) via SIP trunk."
-        }
-      },
-      "behavior_external_no_number": {
-        "state": {
-          "external_no_number": "External mode active but no number set in {label}."
-        }
-      },
-      "behavior_deactivated": {
-        "state": {
-          "deactivated": "Doorbell is deactivated. Calls will be ignored."
-        }
-      }
-    },
     "select": {
       "doorbell_mode": {
         "state": {

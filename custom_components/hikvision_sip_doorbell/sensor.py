@@ -141,18 +141,8 @@ class BehaviorSummarySensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> str:
-        key, _ = self.coordinator.behavior_summary
-        return key
-
-    @property
-    def translation_key(self) -> str:
-        key, _ = self.coordinator.behavior_summary
-        return f"behavior_{key}"
-
-    @property
-    def translation_placeholders(self) -> dict:
-        _, placeholders = self.coordinator.behavior_summary
-        return placeholders
+        lang = self.hass.config.language if self.hass else "en"
+        return self.coordinator.behavior_summary(lang)
 
     @callback
     def _handle_coordinator_update(self) -> None:

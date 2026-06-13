@@ -156,33 +156,34 @@ class DoorbellCoordinator(DataUpdateCoordinator):
             return ""
         return state.state
 
-    @property
-    def behavior_summary(self) -> tuple[str, dict]:
-        """Return (translation_key, placeholders) describing current routing behaviour."""
+    def behavior_summary(self, lang: str = "en") -> str:
+        """Human-readable description of current routing behaviour, in the given language."""
+        it = lang.startswith("it")
         mode = self.mode
+        ext = self._internal_ext
         if mode == "deactivated":
-            return ("deactivated", {})
+            return "Videocitofono disattivato. Le chiamate verranno ignorate." if it else "Doorbell is deactivated. Calls will be ignored."
         if mode in ("away_from_home", "vacation"):
             phone = self.number_to_call
             label = self.selected_phone_entity or "—"
             if phone:
-                return ("external_ok", {"phone": phone, "label": label})
-            return ("external_no_number", {"label": label})
+                return f"Chiamerà il numero esterno {phone} ({label}) via trunk SIP." if it else f"Will call {phone} ({label}) via SIP trunk."
+            return f"Modalità esterna attiva ma nessun numero impostato in '{label}'." if it else f"External mode active but no number set in '{label}'."
         # at_home
         registered = self._is_internal_ext_registered()
         if registered:
-            return ("at_home_registered", {"extension": self._internal_ext})
+            return f"Chiamerà l'interno {ext}." if it else f"Will ring indoor extension {ext}."
         fallback = self._internal_fallback
         if fallback == "call_external":
             phone = self.number_to_call
             label = self.selected_phone_entity or "—"
             if phone:
-                return ("at_home_fallback_call_external", {"extension": self._internal_ext, "phone": phone, "label": label})
-            return ("at_home_fallback_call_external_no_number", {"extension": self._internal_ext, "label": label})
+                return f"Interno {ext} non registrato. Chiamerà il numero esterno {phone} ({label})." if it else f"Indoor extension {ext} not registered. Will call {phone} ({label})."
+            return f"Interno {ext} non registrato. Fallback esterno ma nessun numero impostato in '{label}'." if it else f"Indoor extension {ext} not registered. Fallback is call external but no number set in '{label}'."
         if fallback == "none":
-            return ("at_home_fallback_none", {"extension": self._internal_ext})
+            return f"Interno {ext} non registrato. La chiamata verrà ignorata." if it else f"Indoor extension {ext} not registered. Call will be ignored."
         # wait
-        return ("at_home_fallback_wait", {"extension": self._internal_ext, "wait_s": str(AMI_WAIT_ON_FALLBACK_S)})
+        return f"Interno {ext} non registrato. Squilla comunque e aspetta {AMI_WAIT_ON_FALLBACK_S}s." if it else f"Indoor extension {ext} not registered. Will ring anyway and wait {AMI_WAIT_ON_FALLBACK_S}s."
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 

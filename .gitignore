@@ -1,7 +1,34 @@
-tmp
-**/__pycache__/
-**/*.pyc
-**/*.pyo
-**/*.pyd
-DS_Store
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python generated files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Build/package output
+build/
+dist/
+*.egg-info/
+
+# OS and editor files
+.DS_Store
+.AppleDouble
+.LSOverride
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local temporary files
+tmp/
 *.log
+*.tmp
+*.bak
