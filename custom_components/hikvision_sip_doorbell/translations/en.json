@@ -1,0 +1,58 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Hikvision SIP Doorbell — Device settings",
+        "data": {
+          "device_id": "Doorbell MQTT sensor (select the Call state sensor)",
+          "doorbell_extension": "Doorbell SIP endpoint (select from Asterisk)",
+          "internal_extension": "Indoor SIP endpoint to ring (select from Asterisk)",
+          "sip_trunk": "SIP trunk for external calls (select from Asterisk)",
+          "sip_domain": "VoIP domain for external calls (e.g. sip.example.com)"
+        },
+        "data_description": {
+          "device_id": "Select the 'Call state' sensor created by the Hikvision Addons MQTT addon",
+          "sip_trunk": "Select the trunk endpoint — the integration will build PJSIP/trunk/ automatically"
+        }
+      },
+      "mode_map": {
+        "title": "Hikvision SIP Doorbell — Phone numbers & fallback",
+        "description": "Select the input_text entity that holds the phone number to call for each external mode. Leave empty to skip.",
+        "data": {
+          "away_from_home": "Phone number entity for Away from home",
+          "vacation": "Phone number entity for Vacation",
+          "internal_fallback": "Fallback when indoor extension is unreachable"
+        },
+        "data_description": {
+          "internal_fallback": "What to do when at_home mode is active but the indoor SIP extension is not registered"
+        }
+      }
+    },
+    "error": {
+      "device_id_not_found": "Could not extract the MQTT device ID from the selected entity. Try selecting the Call state sensor.",
+      "endpoint_not_found": "Could not resolve the Asterisk endpoint name from the selected entity."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Hikvision SIP Doorbell — Options",
+        "data": {
+          "doorbell_extension": "Doorbell SIP endpoint",
+          "internal_extension": "Indoor SIP endpoint",
+          "sip_trunk": "SIP trunk for external calls",
+          "sip_domain": "VoIP domain for external calls",
+          "away_from_home": "Phone number entity for Away from home",
+          "vacation": "Phone number entity for Vacation",
+          "internal_fallback": "Fallback when indoor extension is unreachable"
+        }
+      }
+    },
+    "error": {
+      "endpoint_not_found": "Could not resolve the Asterisk endpoint name from the selected entity."
+    }
+  }
+}

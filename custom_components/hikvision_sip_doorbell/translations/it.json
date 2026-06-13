@@ -1,0 +1,58 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Videocitofono Hikvision SIP — Impostazioni dispositivo",
+        "data": {
+          "device_id": "Sensore MQTT del videocitofono (seleziona il sensore Call state)",
+          "doorbell_extension": "Interno SIP del videocitofono (seleziona da Asterisk)",
+          "internal_extension": "Interno SIP da chiamare in casa (seleziona da Asterisk)",
+          "sip_trunk": "Trunk SIP per chiamate esterne (seleziona da Asterisk)",
+          "sip_domain": "Dominio VoIP per chiamate esterne (es. sip.esempio.it)"
+        },
+        "data_description": {
+          "device_id": "Seleziona il sensore 'Call state' creato dall'addon MQTT Hikvision Addons",
+          "sip_trunk": "Seleziona il trunk — l'integrazione costruisce PJSIP/trunk/ automaticamente"
+        }
+      },
+      "mode_map": {
+        "title": "Videocitofono Hikvision SIP — Numeri di telefono e fallback",
+        "description": "Seleziona l'entità input_text che contiene il numero da chiamare per ogni modalità esterna. Lascia vuoto per saltare.",
+        "data": {
+          "away_from_home": "Entità numero per Fuori casa",
+          "vacation": "Entità numero per Vacanza",
+          "internal_fallback": "Fallback quando l'interno SIP non è raggiungibile"
+        },
+        "data_description": {
+          "internal_fallback": "Cosa fare quando la modalità è 'in casa' ma l'interno SIP (es. 6002) non è registrato"
+        }
+      }
+    },
+    "error": {
+      "device_id_not_found": "Impossibile estrarre il device ID MQTT dall'entità selezionata. Prova a selezionare il sensore Call state.",
+      "endpoint_not_found": "Impossibile risolvere il nome dell'endpoint Asterisk dall'entità selezionata."
+    },
+    "abort": {
+      "already_configured": "Questo dispositivo è già configurato."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Videocitofono Hikvision SIP — Opzioni",
+        "data": {
+          "doorbell_extension": "Interno SIP del videocitofono",
+          "internal_extension": "Interno SIP da chiamare in casa",
+          "sip_trunk": "Trunk SIP per chiamate esterne",
+          "sip_domain": "Dominio VoIP per chiamate esterne",
+          "away_from_home": "Entità numero per Fuori casa",
+          "vacation": "Entità numero per Vacanza",
+          "internal_fallback": "Fallback quando l'interno SIP non è raggiungibile"
+        }
+      }
+    },
+    "error": {
+      "endpoint_not_found": "Impossibile risolvere il nome dell'endpoint Asterisk dall'entità selezionata."
+    }
+  }
+}
