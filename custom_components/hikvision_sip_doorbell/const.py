@@ -11,11 +11,8 @@ CONF_INTERNAL_EXTENSION = "internal_extension"  # Asterisk PJSIP extension to ri
 CONF_SIP_TRUNK = "sip_trunk"                # Asterisk trunk prefix (e.g. "PJSIP/iliad-trunk/")
 CONF_SIP_DOMAIN = "sip_domain"              # VoIP domain for external calls (e.g. "voip.iliad.it")
 
-# Map: mode → input_text entity_id holding the phone number to call
-# Only external modes need an entry; internal/none modes are handled automatically.
-# Example: {"away_from_home": "input_text.my_phone", "vacation": "input_text.my_phone"}
-CONF_MODE_MAP = "mode_map"
 CONF_CALL_STATE_ENTITY = "call_state_entity"  # entity_id of the Hikvision MQTT call_state sensor
+CONF_PHONE_ENTITIES = "phone_entities"        # list of input_text entity_ids for external call number
 
 # Behaviour when at_home internal extension is unreachable (not registered)
 # "wait"          — keep channel open, doorbell keeps ringing (user answers from panel)
@@ -59,4 +56,3 @@ DEFAULT_SIP_DOMAIN = "sip.example.com"
 
 # Entity unique id suffixes
 SUFFIX_MODE = "mode"
-SUFFIX_NUMBER_TO_CALL = "number_to_call"

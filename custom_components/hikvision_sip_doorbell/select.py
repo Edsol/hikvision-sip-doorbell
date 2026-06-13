@@ -12,6 +12,8 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from homeassistant.helpers import entity_registry as er
+
 from .const import (
     CONF_DEVICE_ID,
     DEFAULT_INTERNAL_FALLBACK,
@@ -34,6 +36,7 @@ async def async_setup_entry(
     async_add_entities([
         DoorbellModeSelect(coordinator, entry),
         InternalFallbackSelect(coordinator, entry),
+        NumberToCallSelect(coordinator, entry),
     ])
 
 
@@ -42,6 +45,7 @@ class DoorbellModeSelect(CoordinatorEntity, SelectEntity):
 
     _attr_icon = "mdi:doorbell-video"
     _attr_options = DOORBELL_MODES
+    _attr_translation_key = "doorbell_mode"
 
     def __init__(self, coordinator: DoorbellCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
@@ -73,6 +77,7 @@ class InternalFallbackSelect(CoordinatorEntity, SelectEntity):
     _attr_icon = "mdi:phone-missed"
     _attr_options = INTERNAL_FALLBACK_OPTIONS
     _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "internal_fallback"
 
     def __init__(self, coordinator: DoorbellCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
@@ -92,6 +97,41 @@ class InternalFallbackSelect(CoordinatorEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         await self.coordinator.async_set_internal_fallback(option)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
+
+
+class NumberToCallSelect(CoordinatorEntity, SelectEntity):
+    """Select entity for choosing which input_text entity holds the phone number to call."""
+
+    _attr_icon = "mdi:phone"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: DoorbellCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        device_id = entry.data[CONF_DEVICE_ID]
+        self._attr_unique_id = f"{DOMAIN}_{device_id}_number_to_call"
+        self._attr_name = "Number to Call"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_id)},
+            name="Hikvision Doorbell",
+            manufacturer="Hikvision",
+            model=entry.data.get("model", "DS-KV6113-WPE1(C)"),
+        )
+
+    @property
+    def options(self) -> list[str]:
+        return self.coordinator.phone_entities
+
+    @property
+    def current_option(self) -> str | None:
+        sel = self.coordinator.selected_phone_entity
+        return sel if sel in self.coordinator.phone_entities else None
+
+    async def async_select_option(self, option: str) -> None:
+        await self.coordinator.async_set_selected_phone_entity(option)
 
     @callback
     def _handle_coordinator_update(self) -> None:

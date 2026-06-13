@@ -1,4 +1,65 @@
 {
+  "entity": {
+    "sensor": {
+      "behavior_at_home_registered": {
+        "state": {
+          "at_home_registered": "Will ring indoor extension {extension}."
+        }
+      },
+      "behavior_at_home_fallback_wait": {
+        "state": {
+          "at_home_fallback_wait": "Indoor extension {extension} not registered. Will ring anyway and wait {wait_s}s."
+        }
+      },
+      "behavior_at_home_fallback_call_external": {
+        "state": {
+          "at_home_fallback_call_external": "Indoor extension {extension} not registered. Will call {phone} ({label})."
+        }
+      },
+      "behavior_at_home_fallback_call_external_no_number": {
+        "state": {
+          "at_home_fallback_call_external_no_number": "Indoor extension {extension} not registered. Fallback is call external but no number set in {label}."
+        }
+      },
+      "behavior_at_home_fallback_none": {
+        "state": {
+          "at_home_fallback_none": "Indoor extension {extension} not registered. Call will be ignored."
+        }
+      },
+      "behavior_external_ok": {
+        "state": {
+          "external_ok": "Will call {phone} ({label}) via SIP trunk."
+        }
+      },
+      "behavior_external_no_number": {
+        "state": {
+          "external_no_number": "External mode active but no number set in {label}."
+        }
+      },
+      "behavior_deactivated": {
+        "state": {
+          "deactivated": "Doorbell is deactivated. Calls will be ignored."
+        }
+      }
+    },
+    "select": {
+      "doorbell_mode": {
+        "state": {
+          "at_home": "At home",
+          "away_from_home": "Away from home",
+          "vacation": "Vacation",
+          "deactivated": "Deactivated"
+        }
+      },
+      "internal_fallback": {
+        "state": {
+          "wait": "Wait (keep ringing)",
+          "call_external": "Call external number",
+          "none": "Do nothing"
+        }
+      }
+    }
+  },
   "config": {
     "step": {
       "user": {
@@ -14,18 +75,6 @@
           "device_id": "Select the 'Call state' sensor created by the Hikvision Addons MQTT addon",
           "sip_trunk": "Select the trunk endpoint — the integration will build PJSIP/trunk/ automatically"
         }
-      },
-      "mode_map": {
-        "title": "Hikvision SIP Doorbell — Phone numbers & fallback",
-        "description": "Select the input_text entity that holds the phone number to call for each external mode. Leave empty to skip.",
-        "data": {
-          "away_from_home": "Phone number entity for Away from home",
-          "vacation": "Phone number entity for Vacation",
-          "internal_fallback": "Fallback when indoor extension is unreachable"
-        },
-        "data_description": {
-          "internal_fallback": "What to do when at_home mode is active but the indoor SIP extension is not registered"
-        }
       }
     },
     "error": {
@@ -39,15 +88,26 @@
   "options": {
     "step": {
       "init": {
-        "title": "Hikvision SIP Doorbell — Options",
+        "menu_options": {
+          "sip_settings": "SIP Settings",
+          "phone_numbers": "Phone Numbers",
+          "done": "Save & Close"
+        }
+      },
+      "sip_settings": {
+        "title": "SIP Settings",
         "data": {
           "doorbell_extension": "Doorbell SIP endpoint",
           "internal_extension": "Indoor SIP endpoint",
           "sip_trunk": "SIP trunk for external calls",
-          "sip_domain": "VoIP domain for external calls",
-          "away_from_home": "Phone number entity for Away from home",
-          "vacation": "Phone number entity for Vacation",
-          "internal_fallback": "Fallback when indoor extension is unreachable"
+          "sip_domain": "VoIP domain for external calls"
+        }
+      },
+      "phone_numbers": {
+        "title": "Phone Numbers",
+        "description": "Select the input_text entities that contain phone numbers for external call modes. The selected entities will appear as options in the 'Number to Call' selector on the device page.",
+        "data": {
+          "phone_entities": "Phone number entities"
         }
       }
     },

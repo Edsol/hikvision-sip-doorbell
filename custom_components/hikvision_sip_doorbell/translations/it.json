@@ -1,4 +1,23 @@
 {
+  "entity": {
+    "select": {
+      "doorbell_mode": {
+        "state": {
+          "at_home": "In casa",
+          "away_from_home": "Fuori casa",
+          "vacation": "Vacanza",
+          "deactivated": "Disattivato"
+        }
+      },
+      "internal_fallback": {
+        "state": {
+          "wait": "Aspetta (continua a squillare)",
+          "call_external": "Chiama numero esterno",
+          "none": "Non fare nulla"
+        }
+      }
+    }
+  },
   "config": {
     "step": {
       "user": {
@@ -14,18 +33,6 @@
           "device_id": "Seleziona il sensore 'Call state' creato dall'addon MQTT Hikvision Addons",
           "sip_trunk": "Seleziona il trunk — l'integrazione costruisce PJSIP/trunk/ automaticamente"
         }
-      },
-      "mode_map": {
-        "title": "Videocitofono Hikvision SIP — Numeri di telefono e fallback",
-        "description": "Seleziona l'entità input_text che contiene il numero da chiamare per ogni modalità esterna. Lascia vuoto per saltare.",
-        "data": {
-          "away_from_home": "Entità numero per Fuori casa",
-          "vacation": "Entità numero per Vacanza",
-          "internal_fallback": "Fallback quando l'interno SIP non è raggiungibile"
-        },
-        "data_description": {
-          "internal_fallback": "Cosa fare quando la modalità è 'in casa' ma l'interno SIP (es. 6002) non è registrato"
-        }
       }
     },
     "error": {
@@ -39,15 +46,26 @@
   "options": {
     "step": {
       "init": {
-        "title": "Videocitofono Hikvision SIP — Opzioni",
+        "menu_options": {
+          "sip_settings": "Impostazioni SIP",
+          "phone_numbers": "Numeri di telefono",
+          "done": "Salva e chiudi"
+        }
+      },
+      "sip_settings": {
+        "title": "Impostazioni SIP",
         "data": {
           "doorbell_extension": "Interno SIP del videocitofono",
           "internal_extension": "Interno SIP da chiamare in casa",
           "sip_trunk": "Trunk SIP per chiamate esterne",
-          "sip_domain": "Dominio VoIP per chiamate esterne",
-          "away_from_home": "Entità numero per Fuori casa",
-          "vacation": "Entità numero per Vacanza",
-          "internal_fallback": "Fallback quando l'interno SIP non è raggiungibile"
+          "sip_domain": "Dominio VoIP per chiamate esterne"
+        }
+      },
+      "phone_numbers": {
+        "title": "Numeri di telefono",
+        "description": "Seleziona le entità input_text che contengono i numeri da chiamare per le modalità esterne. Le entità selezionate appariranno come opzioni nel selettore 'Number to Call' nella pagina del dispositivo.",
+        "data": {
+          "phone_entities": "Entità con numero di telefono"
         }
       }
     },

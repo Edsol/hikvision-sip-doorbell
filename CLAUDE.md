@@ -13,19 +13,21 @@ A Home Assistant custom integration for the **Hikvision DS-KV6113-WPE1(C)** vide
 ## Architecture overview
 
 ```
-MQTT (Hikvision Addons addon)
-  └── hikvision/<device_id>/call_state  →  coordinator._on_call_state()
-  └── hikvision/<device_id>/contact     →  coordinator._on_contact()
+Hikvision Addons MQTT addon
+  └── publishes sensor state to HA (e.g. sensor.videocitofono_call_state)
 
-coordinator._on_call_state():
-  if call_state == "ringing":
-    → async_create_task(_async_originate())
-      → builds AMI Originate parameters from current mode + mode_map
-      → hass.services.async_call("asterisk", "send_action", {Originate})
+coordinator._async_subscribe_call_state()
+  └── async_track_state_change_event on the MQTT sensor entity
+        if new state == "ringing":
+          → async_create_task(_async_originate())
+            → builds AMI Originate parameters from current mode + selected phone entity
+            → hass.services.async_call("asterisk", "send_action", {Originate})
 
 Asterisk AMI
   └── Originate → routes call to internal extension or external SIP trunk
 ```
+
+Call state is tracked via `async_track_state_change_event` on the existing HA MQTT sensor entity — **not** via direct MQTT subscription. This avoids MQTT topic guessing and unique_id collisions.
 
 ---
 
@@ -33,12 +35,16 @@ Asterisk AMI
 
 | File | Entities | Notes |
 |---|---|---|
-| `coordinator.py` | — | Central state, MQTT subscriptions, AMI Originate, SIP discovery |
+| `coordinator.py` | — | Central state, call state tracking, AMI Originate, SIP discovery, persistence |
 | `select.py` | `select.doorbell_mode` | at_home / away_from_home / vacation / deactivated |
-| `sensor.py` | `sensor.call_state`, `sensor.number_to_call`, `sensor.active_contact` | Operational |
-| `sensor.py` | `sensor.doorbell_extension`, `sensor.internal_extension`, `sensor.sip_trunk`, `sensor.sip_domain` | Diagnostic (EntityCategory.DIAGNOSTIC) |
-| `button.py` | `button.discover_sip_domain` | Diagnostic — triggers manual SIP domain discovery |
-| `config_flow.py` | — | 2-step wizard + options flow |
+| `select.py` | `select.internal_fallback` | wait / call_external / none — `EntityCategory.CONFIG` |
+| `select.py` | `select.number_to_call` | friendly names of configured input_text entities — `EntityCategory.CONFIG` |
+| `sensor.py` | `sensor.call_state` | Operational — idle / ringing / answered / dismissed |
+| `sensor.py` | `sensor.doorbell_extension`, `sensor.internal_extension`, `sensor.sip_trunk`, `sensor.sip_domain` | `EntityCategory.DIAGNOSTIC` |
+| `sensor.py` | `sensor.behavior_summary` | `EntityCategory.DIAGNOSTIC` — human-readable description of current routing behaviour |
+| `button.py` | `button.discover_sip_domain` | `EntityCategory.DIAGNOSTIC` — manual SIP domain re-discovery |
+| `button.py` | `button.simulate_ring` | `EntityCategory.DIAGNOSTIC` — triggers `_async_originate()` without a real doorbell press |
+| `config_flow.py` | — | Single-step config flow + menu-driven options flow |
 
 ---
 
@@ -46,15 +52,15 @@ Asterisk AMI
 
 ```python
 {
-    "device_id": "myfrontdoor",            # MQTT topic prefix (extracted from MQTT entity)
-    "doorbell_extension": "6001",          # SIP number of the doorbell panel (used in CallerID)
-    "internal_extension": "6002",          # Asterisk PJSIP extension to ring indoors
-    "sip_trunk": "PJSIP/my-trunk/",       # SIP trunk prefix for external calls
-    "sip_domain": "sip.example.com",       # VoIP domain — auto-discovered via AMI on first run
-    "mode_map": {                          # mode → input_text entity_id (external modes only)
-        "away_from_home": "input_text.my_phone",
-        "vacation": "input_text.my_phone",
-    }
+    "device_id": "myfrontdoor",              # MQTT topic prefix (extracted from MQTT sensor entity)
+    "call_state_entity": "sensor.myfrontdoor_call_state",  # HA entity to track
+    "doorbell_extension": "6001",            # SIP number of the doorbell panel (CallerID)
+    "internal_extension": "6002",            # Asterisk PJSIP extension to ring indoors
+    "sip_trunk": "PJSIP/my-trunk/",         # SIP trunk prefix for external calls
+    "sip_domain": "sip.example.com",         # VoIP domain — auto-discovered via AMI on first run
+    "phone_entities": [                      # list of input_text entity_ids for external calls
+        "input_text.my_phone",
+    ]
 }
 ```
 
@@ -64,28 +70,53 @@ Asterisk AMI
 
 ## Config flow
 
-**Step 1 — Device settings** (all via EntitySelector, no free-text except sip_domain):
+**Config step — Device settings** (all via EntitySelector, no free-text except sip_domain):
 
 | Field | Selector | How resolved |
 |---|---|---|
-| `device_id` | MQTT sensor (integration: mqtt, domain: sensor) | `_device_id_from_mqtt_entity()`: strips known suffix from unique_id (e.g. `videocitofono_call_state` → `videocitofono`) |
+| `device_id` / `call_state_entity` | MQTT sensor (integration: mqtt, domain: sensor) | `_device_id_from_mqtt_entity()`: strips known suffix from unique_id; `call_state_entity` = original entity_id |
 | `doorbell_extension` | Asterisk binary_sensor (integration: asterisk, domain: binary_sensor) | `_endpoint_name_from_entity()`: reads device.name from device registry (e.g. `PJSIP/6001` → `6001`) |
 | `internal_extension` | same | same |
-| `sip_trunk` | same | same, result prefixed as `PJSIP/<name>/` |
+| `sip_trunk` | same | same, result stored as `PJSIP/<name>/` |
 | `sip_domain` | Free text | Default `sip.example.com` — auto-discovered post-setup |
 
-**Step 2 — Phone numbers**: EntitySelector (domain: input_text) for each external mode (away_from_home, vacation).
-
-**Options flow**: edits all fields from step 1 + mode_map.
+**Options flow** — menu-driven (`async_show_menu`):
+- **SIP Settings**: edit doorbell/internal ext, trunk, domain
+- **Phone Numbers**: multi-select EntitySelector (domain: input_text) → saved as `CONF_PHONE_ENTITIES` list
+- **Save & Close**: writes updated data to config entry
 
 ---
 
-## MQTT topics
+## Runtime entities
 
-| Topic | Values | Action |
+### select.number_to_call
+- Options: **friendly names** of the `input_text` entities configured in the options flow
+- Stored internally as `entity_id` (e.g. `input_text.my_phone`); coordinator resolves friendly name ↔ entity_id
+- Reading the phone number: `coordinator.number_to_call` reads `hass.states.get(entity_id).state`
+- Persistence: selected entity_id is saved in Store
+
+### select.internal_fallback
+Applies only when `mode=at_home` and the indoor extension is not registered in Asterisk:
+- `wait` — send Originate anyway, dialplan `Wait(25)` keeps the channel open
+- `call_external` — route to external number via SIP trunk (uses `number_to_call`)
+- `none` — ignore the ring entirely
+
+### sensor.behavior_summary
+Human-readable string updated on every coordinator state change. Examples:
+- `"Will ring indoor extension 6002."`
+- `"Indoor extension 6002 is not registered. Will ring anyway and wait 25s."`
+- `"Will call external number +391234567890 (My Phone) via SIP trunk."`
+- `"Doorbell is deactivated — calls will be ignored."`
+
+---
+
+## MQTT / call state tracking
+
+| HA entity | Values | Action |
 |---|---|---|
-| `hikvision/<device_id>/call_state` | idle / ringing / answered / dismissed | Triggers AMI Originate on `ringing` |
-| `hikvision/<device_id>/contact` | contact name string | Updates `sensor.active_contact` (informational only) |
+| `sensor.<device_id>_call_state` (or configured entity) | idle / ringing / answered / dismissed | Triggers AMI Originate on `ringing` |
+
+The coordinator does **not** subscribe to MQTT directly. It uses `async_track_state_change_event` on the existing MQTT sensor entity.
 
 ---
 
@@ -98,9 +129,9 @@ Defined in `const.py → DIAL_ROUTE`:
 | `at_home` | internal | `PJSIP/<internal_extension>` |
 | `away_from_home` | external | `<sip_trunk>sip:<phone>@<sip_domain>` |
 | `vacation` | external | same as away_from_home |
-| `deactivated` | none | no Originate — doorbell rings unanswered |
+| `deactivated` | none | no Originate |
 
-If external mode has no phone number in mode_map (or the input_text is empty), falls back to internal.
+If external mode has no phone number configured (or the input_text is empty/unavailable), falls back to internal extension with a warning log.
 
 AMI Originate parameters:
 ```python
@@ -122,23 +153,53 @@ AMI Originate parameters:
 `coordinator._async_discover_sip_domain(force=False)`:
 
 1. Triggered automatically at coordinator setup **only if** `sip_domain == DEFAULT_SIP_DOMAIN` (`sip.example.com`)
-2. Also triggered manually via `button.discover_sip_domain` (always runs, `force=True`)
+2. Also triggered manually via `button.discover_sip_domain` (`force=True`)
 3. Waits up to 15 seconds for `hass.data["asterisk"]` to be populated
 4. Uses the Asterisk integration's AMI client directly (`hass.data["asterisk"][entry_id]["client"]`)
 5. Sends `PJSIPShowEndpoint <trunk_name>` → listens for `EndpointDetail` event
-6. Extracts `FromDomain` field from the event
-7. Persists to config entry via `async_update_entry` → survives restarts
-8. Calls `async_update_listeners()` → `sensor.sip_domain` updates immediately in UI
+6. Extracts `FromDomain` field → persists to config entry via `async_update_entry`
 
-The AMI client is accessed directly (not via `asterisk.send_action` service) because `send_action` is fire-and-forget and cannot return event data.
+The AMI client is accessed directly (not via `asterisk.send_action`) because `send_action` is fire-and-forget and cannot return event data.
 
 ---
 
 ## Persistence
 
-`coordinator.py` uses `homeassistant.helpers.storage.Store` to persist `mode` and `active_contact` across HA restarts. Storage key: `hikvision_sip_doorbell_<entry_id>`.
+`coordinator.py` uses `homeassistant.helpers.storage.Store` to persist across restarts:
+- `mode`
+- `internal_fallback`
+- `selected_phone_entity` (entity_id, not friendly name)
 
-`sip_domain` is persisted directly in the config entry data via `async_update_entry`.
+Storage key: `hikvision_sip_doorbell_<entry_id>`.
+
+`sip_domain` is persisted in config entry data via `async_update_entry`.
+
+---
+
+## Entity unique_id convention
+
+All unique_ids are prefixed with `{DOMAIN}_{device_id}_` to avoid collisions with MQTT entities that share the same device_id namespace. Example: `hikvision_sip_doorbell_myfrontdoor_call_state`.
+
+---
+
+## Translations — keep always in sync
+
+**Rule: whenever you add or change a user-visible string (entity name, select option, sensor state, config/options flow label), update all three files before finishing:**
+
+```
+strings.json              ← source of truth, English
+translations/en.json      ← identical to strings.json
+translations/it.json      ← Italian translation
+```
+
+Translations cover:
+- `config.step.*` — config flow labels
+- `options.step.*` — options flow labels (including `menu_options` for `async_show_menu` steps)
+- `entity.select.<translation_key>.state.*` — select entity option labels (requires `_attr_translation_key` on the entity class)
+
+Select entities with translated options:
+- `DoorbellModeSelect` → `_attr_translation_key = "doorbell_mode"`
+- `InternalFallbackSelect` → `_attr_translation_key = "internal_fallback"`
 
 ---
 
@@ -146,8 +207,8 @@ The AMI client is accessed directly (not via `asterisk.send_action` service) bec
 
 1. Add the mode string to `DOORBELL_MODES` in `const.py`
 2. Add its routing entry to `DIAL_ROUTE` in `const.py`
-3. If it needs an external phone number, add it to `EXTERNAL_MODES` — this automatically adds it to the config flow step 2 and options flow
-4. Update translations if needed
+3. If it needs an external phone number, add it to `EXTERNAL_MODES`
+4. Update `entity.select.doorbell_mode.state` in all three translation files
 
 ---
 
@@ -155,11 +216,11 @@ The AMI client is accessed directly (not via `asterisk.send_action` service) bec
 
 ```
 const.py        ← modes, dial routes, config entry keys, AMI/SIP defaults
-coordinator.py  ← MQTT subscriptions, AMI Originate, SIP discovery, persistence
-config_flow.py  ← 2-step setup wizard + options flow, entity resolution helpers
-select.py       ← select.doorbell_mode entity
-sensor.py       ← operational + diagnostic sensor entities
-button.py       ← button.discover_sip_domain entity
-strings.json    ← translation source of truth (always update this first)
-translations/   ← en.json, it.json (keep in sync with strings.json)
+coordinator.py  ← call state tracking, AMI Originate, SIP discovery, persistence, behavior_summary
+config_flow.py  ← config flow + menu-driven options flow, entity resolution helpers
+select.py       ← DoorbellModeSelect, InternalFallbackSelect, NumberToCallSelect
+sensor.py       ← call_state (operational) + diagnostic sensors + behavior_summary sensor
+button.py       ← DiscoverSipDomainButton, SimulateRingButton
+strings.json    ← translation source of truth (update first, then sync en.json and it.json)
+translations/   ← en.json, it.json
 ```

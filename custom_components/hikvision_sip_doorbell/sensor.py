@@ -17,7 +17,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     CONF_DEVICE_ID,
     DOMAIN,
-    SUFFIX_NUMBER_TO_CALL,
 )
 from .coordinator import DoorbellCoordinator
 
@@ -38,12 +37,6 @@ SENSOR_DESCRIPTIONS: tuple[DoorbellSensorDescription, ...] = (
         name="Call State",
         icon="mdi:phone-ring",
         value_fn=lambda c: c.call_state,
-    ),
-    DoorbellSensorDescription(
-        key=SUFFIX_NUMBER_TO_CALL,
-        name="Number to Call",
-        icon="mdi:phone",
-        value_fn=lambda c: c.number_to_call,
     ),
 )
 
@@ -91,7 +84,7 @@ async def async_setup_entry(
         [
             DoorbellSensor(coordinator, entry, desc)
             for desc in (*SENSOR_DESCRIPTIONS, *DIAGNOSTIC_DESCRIPTIONS)
-        ]
+        ] + [BehaviorSummarySensor(coordinator, entry)]
     )
 
 
@@ -122,6 +115,44 @@ class DoorbellSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> str:
         return self.entity_description.value_fn(self.coordinator)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
+
+
+class BehaviorSummarySensor(CoordinatorEntity, SensorEntity):
+    """Diagnostic sensor showing a translated description of current routing behaviour."""
+
+    _attr_icon = "mdi:information-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_name = "Behavior Summary"
+
+    def __init__(self, coordinator: DoorbellCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        device_id = entry.data[CONF_DEVICE_ID]
+        self._attr_unique_id = f"{DOMAIN}_{device_id}_diag_behavior_summary"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_id)},
+            name="Hikvision SIP Doorbell",
+            manufacturer="Hikvision",
+            model=entry.data.get("model", "DS-KV6113-WPE1(C)"),
+        )
+
+    @property
+    def native_value(self) -> str:
+        key, _ = self.coordinator.behavior_summary
+        return key
+
+    @property
+    def translation_key(self) -> str:
+        key, _ = self.coordinator.behavior_summary
+        return f"behavior_{key}"
+
+    @property
+    def translation_placeholders(self) -> dict:
+        _, placeholders = self.coordinator.behavior_summary
+        return placeholders
 
     @callback
     def _handle_coordinator_update(self) -> None:

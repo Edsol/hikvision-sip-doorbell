@@ -43,7 +43,7 @@ from .const import (
     CONF_DOORBELL_EXTENSION,
     CONF_INTERNAL_EXTENSION,
     CONF_INTERNAL_FALLBACK,
-    CONF_MODE_MAP,
+    CONF_PHONE_ENTITIES,
     CONF_SIP_DOMAIN,
     CONF_SIP_TRUNK,
     DEFAULT_DOORBELL_EXTENSION,
@@ -77,7 +77,8 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         self._internal_ext: str = entry.data[CONF_INTERNAL_EXTENSION]
         self._sip_trunk: str = entry.data[CONF_SIP_TRUNK]
         self._sip_domain: str = entry.data.get(CONF_SIP_DOMAIN, DEFAULT_SIP_DOMAIN)
-        self._mode_map: dict[str, str] = dict(entry.data.get(CONF_MODE_MAP, {}))
+        self._phone_entities: list[str] = list(entry.data.get(CONF_PHONE_ENTITIES, []))
+        self._selected_phone_entity: str = ""  # entity_id chosen by the select entity
         self._internal_fallback: str = entry.data.get(CONF_INTERNAL_FALLBACK, DEFAULT_INTERNAL_FALLBACK)
         self._call_state_entity: str = entry.data.get(CONF_CALL_STATE_ENTITY, "")
 
@@ -113,15 +114,75 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         return self._internal_fallback
 
     @property
-    def number_to_call(self) -> str:
-        """Phone number configured for the current mode (empty for internal/none)."""
-        entity_id = self._mode_map.get(self.mode)
-        if not entity_id:
+    def phone_entities(self) -> list[str]:
+        """Return friendly names of configured phone entities (used as select options)."""
+        names = []
+        for entity_id in self._phone_entities:
+            state = self.hass.states.get(entity_id)
+            name = (
+                state.attributes.get("friendly_name") if state else None
+            ) or entity_id
+            names.append(name)
+        return names
+
+    def _entity_id_from_friendly_name(self, name: str) -> str | None:
+        """Resolve a friendly name back to its entity_id."""
+        for entity_id in self._phone_entities:
+            state = self.hass.states.get(entity_id)
+            friendly = (
+                state.attributes.get("friendly_name") if state else None
+            ) or entity_id
+            if friendly == name:
+                return entity_id
+        return None
+
+    @property
+    def selected_phone_entity(self) -> str:
+        """Return the friendly name of the currently selected phone entity."""
+        if not self._selected_phone_entity:
             return ""
-        state = self.hass.states.get(entity_id)
+        state = self.hass.states.get(self._selected_phone_entity)
+        return (
+            state.attributes.get("friendly_name") if state else None
+        ) or self._selected_phone_entity
+
+    @property
+    def number_to_call(self) -> str:
+        """Phone number from the currently selected entity, empty if none selected."""
+        if not self._selected_phone_entity:
+            return ""
+        state = self.hass.states.get(self._selected_phone_entity)
         if state is None or state.state in ("unknown", "unavailable", ""):
             return ""
         return state.state
+
+    @property
+    def behavior_summary(self) -> tuple[str, dict]:
+        """Return (translation_key, placeholders) describing current routing behaviour."""
+        mode = self.mode
+        if mode == "deactivated":
+            return ("deactivated", {})
+        if mode in ("away_from_home", "vacation"):
+            phone = self.number_to_call
+            label = self.selected_phone_entity or "—"
+            if phone:
+                return ("external_ok", {"phone": phone, "label": label})
+            return ("external_no_number", {"label": label})
+        # at_home
+        registered = self._is_internal_ext_registered()
+        if registered:
+            return ("at_home_registered", {"extension": self._internal_ext})
+        fallback = self._internal_fallback
+        if fallback == "call_external":
+            phone = self.number_to_call
+            label = self.selected_phone_entity or "—"
+            if phone:
+                return ("at_home_fallback_call_external", {"extension": self._internal_ext, "phone": phone, "label": label})
+            return ("at_home_fallback_call_external_no_number", {"extension": self._internal_ext, "label": label})
+        if fallback == "none":
+            return ("at_home_fallback_none", {"extension": self._internal_ext})
+        # wait
+        return ("at_home_fallback_wait", {"extension": self._internal_ext, "wait_s": str(AMI_WAIT_ON_FALLBACK_S)})
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -225,6 +286,13 @@ class DoorbellCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("Unknown doorbell mode: %s", mode)
             return
         self.mode = mode
+        await self._async_save_state()
+        self.async_update_listeners()
+
+    async def async_set_selected_phone_entity(self, name_or_entity_id: str) -> None:
+        """Set the selected phone entity (accepts friendly name or entity_id) and persist it."""
+        resolved = self._entity_id_from_friendly_name(name_or_entity_id)
+        self._selected_phone_entity = resolved or name_or_entity_id
         await self._async_save_state()
         self.async_update_listeners()
 
@@ -374,11 +442,13 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         if data:
             self.mode = data.get("mode", DOORBELL_MODES[0])
             self._internal_fallback = data.get("internal_fallback", self._internal_fallback)
+            self._selected_phone_entity = data.get("selected_phone_entity", "")
 
     async def _async_save_state(self) -> None:
         await self._storage.async_save({
             "mode": self.mode,
             "internal_fallback": self._internal_fallback,
+            "selected_phone_entity": self._selected_phone_entity,
         })
 
     # ── DataUpdateCoordinator override ────────────────────────────────────────
@@ -394,6 +464,6 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         self._internal_ext = entry.data.get(CONF_INTERNAL_EXTENSION, self._internal_ext)
         self._sip_trunk = entry.data.get(CONF_SIP_TRUNK, self._sip_trunk)
         self._sip_domain = entry.data.get(CONF_SIP_DOMAIN, self._sip_domain)
-        self._mode_map = dict(entry.data.get(CONF_MODE_MAP, self._mode_map))
         self._internal_fallback = entry.data.get(CONF_INTERNAL_FALLBACK, self._internal_fallback)
+        self._phone_entities = list(entry.data.get(CONF_PHONE_ENTITIES, self._phone_entities))
         self.async_update_listeners()

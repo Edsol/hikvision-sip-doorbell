@@ -23,7 +23,10 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: DoorbellCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([DiscoverSipDomainButton(coordinator, entry)])
+    async_add_entities([
+        DiscoverSipDomainButton(coordinator, entry),
+        SimulateRingButton(coordinator, entry),
+    ])
 
 
 class DiscoverSipDomainButton(ButtonEntity):
@@ -47,3 +50,28 @@ class DiscoverSipDomainButton(ButtonEntity):
     async def async_press(self) -> None:
         # Force re-discovery even if domain was already set
         await self._coordinator._async_discover_sip_domain(force=True)
+
+
+class SimulateRingButton(ButtonEntity):
+    """Button to simulate a doorbell ring — triggers the same Originate flow as a real press."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:doorbell"
+    _attr_name = "Simulate Ring"
+
+    def __init__(self, coordinator: DoorbellCoordinator, entry: ConfigEntry) -> None:
+        device_id = entry.data[CONF_DEVICE_ID]
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{DOMAIN}_{device_id}_simulate_ring"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_id)},
+            name="Hikvision SIP Doorbell",
+            manufacturer="Hikvision",
+            model=entry.data.get("model", "DS-KV6113-WPE1(C)"),
+        )
+
+    async def async_press(self) -> None:
+        _LOGGER.info("Simulate ring triggered manually")
+        self._coordinator.call_state = "ringing"
+        self._coordinator.async_update_listeners()
+        await self._coordinator._async_originate()
