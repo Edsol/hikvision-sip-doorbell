@@ -12,15 +12,26 @@ Entities created:
 from __future__ import annotations
 
 import logging
+import pathlib
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.components.http import StaticPathConfig
 
 from .const import CONF_INTERNAL_EXTENSION, CONF_SIP_TRUNK, DOMAIN, PLATFORMS
 from .coordinator import DoorbellCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Register static www/ path once at domain setup."""
+    www_path = pathlib.Path(__file__).parent / "www"
+    await hass.http.async_register_static_paths([
+        StaticPathConfig(f"/local/{DOMAIN}", str(www_path), cache_headers=False),
+    ])
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -12,7 +12,8 @@ CONF_SIP_TRUNK = "sip_trunk"                # Asterisk trunk prefix (e.g. "PJSIP
 CONF_SIP_DOMAIN = "sip_domain"              # VoIP domain for external calls (e.g. "voip.iliad.it")
 
 CONF_CALL_STATE_ENTITY = "call_state_entity"  # entity_id of the Hikvision MQTT call_state sensor
-CONF_PHONE_ENTITIES = "phone_entities"        # list of input_text entity_ids for external call number
+CONF_ENABLED_MODES = "enabled_modes"          # list of enabled doorbell modes
+CONF_MODE_PHONE_MAP = "mode_phone_map"        # dict: mode → list of input_text entity_ids
 
 # Behaviour when at_home internal extension is unreachable (not registered)
 # "wait"          — keep channel open, doorbell keeps ringing (user answers from panel)
@@ -42,11 +43,11 @@ DIAL_ROUTE = {
     "deactivated": "none",
 }
 
-# AMI Originate defaults
-AMI_CALLER_ID_NAME = "Doorbell"          # Display name in CallerID; combined with doorbell_extension
-AMI_CONTEXT_INTERNAL = "from-door"
-AMI_CONTEXT_EXTERNAL = "from-door"
-AMI_TIMEOUT_MS = "30000"
+# AstDB routing keys — written by HA on mode/number change, read by Asterisk dialplan at ring time
+ASTDB_FAMILY = "routing"
+ASTDB_KEY_CHANNEL = "channel"       # full channel string Asterisk will Dial()
+ASTDB_KEY_MODE = "mode"             # current mode label (informational)
+ASTDB_KEY_FALLBACK = "fallback"     # internal fallback value (informational)
 
 # Default values
 DEFAULT_DOORBELL_EXTENSION = "6001"

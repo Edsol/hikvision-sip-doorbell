@@ -21,18 +21,20 @@ Everything is controlled via a simple mode selector in Home Assistant.
 Doorbell rings
     │
     ▼
-MQTT event (Hikvision Addons addon)
+MQTT event (Hikvision Addons addon) → Home Assistant updates call_state sensor
     │
     ▼
-Home Assistant — checks current mode
+Asterisk reads routing/channel from AstDB → Dial()
     │
-    ├─ at_home      → rings indoor SIP extension (e.g. a desk phone or softphone)
+    ├─ at_home        → rings indoor SIP extension (e.g. a softphone or WebRTC client)
     ├─ away_from_home → calls your mobile via SIP trunk
-    ├─ vacation      → calls your mobile via SIP trunk
-    └─ deactivated   → no call placed
+    ├─ vacation        → calls your mobile via SIP trunk
+    └─ deactivated     → no call placed
 ```
 
-No polling, no AGI scripts. Home Assistant pushes directly to Asterisk via **AMI Originate**.
+No polling, no AGI scripts. Home Assistant writes the routing target to **Asterisk AstDB** whenever the mode or phone number changes. Asterisk reads it at ring time and dials directly — HA is not in the call path.
+
+During an active call, pressing `#` on your mobile opens the gate relay on the doorbell panel (DTMF passthrough, no extra configuration needed).
 
 ---
 
@@ -104,6 +106,7 @@ After setup, the device page shows:
 **Diagnostics**
 - `Doorbell Extension`, `Internal Extension`, `SIP Trunk`, `SIP Domain` — active configuration values
 - `Discover SIP Domain` button — re-reads the VoIP domain from Asterisk on demand
+- `Sync Routing to Asterisk` button — manually writes current routing to AstDB (useful after Asterisk restart)
 
 ---
 
@@ -121,22 +124,103 @@ You don't need to know your SIP provider's domain in advance. After the first se
 
 ### extensions.conf
 
+Add a `[from-door]` context — this is where the doorbell INVITE lands. Asterisk reads the target channel from AstDB (written by HA) and dials directly:
+
 ```ini
 [from-door]
-exten => 6002,1,Dial(PJSIP/6002,30)
-exten => 6002,n,Hangup()
+exten => _X.,1,NoOp(Doorbell ring on ${EXTEN})
+ same => n,Set(CALLERID(num)=Doorbell)
+ same => n,Set(CALLERID(name)=Doorbell)
+ same => n,Set(DEST=${DB(routing/channel)})
+ same => n,GotoIf($["${DEST}" = ""]?noanswer,1)
+ same => n,Dial(${DEST},45)
+ same => n,Hangup()
+
+exten => noanswer,1,Hangup()
 ```
+
+The doorbell PJSIP endpoint (`6001` in the example) must have `context=from-door` in `pjsip.conf`.
+
+### DTMF gate control
+
+Pressing `#` on your mobile during an active call opens the gate relay. This works automatically via Asterisk's DTMF conversion between the trunk (RFC 4733) and the doorbell endpoint (SIP INFO). No dialplan changes needed.
 
 ### manager.conf
 
-The Home Assistant AMI user needs `originate` in both read and write permissions:
+The Home Assistant AMI user needs read/write access to use `DBPut` and `PJSIPShowEndpoint`:
 
 ```ini
 [homeassistant]
 secret = your_secret
-read = system,call,log,verbose,agent,user,config,dtmf,reporting,cdr,dialplan,originate
-write = system,call,log,verbose,agent,user,config,dtmf,reporting,cdr,dialplan,originate
+read = all
+write = all
 ```
+
+After setup, verify AstDB is populated:
+
+```bash
+asterisk -rx "database show routing"
+```
+
+Expected output (example for `at_home` mode):
+```
+/routing/channel   : PJSIP/6002
+/routing/fallback  : wait
+/routing/mode      : at_home
+```
+
+> **Tip:** If Asterisk restarts before HA, AstDB may be empty. Use the **Sync Routing to Asterisk** diagnostic button to repopulate it without restarting HA.
+
+For a complete reference configuration (pjsip.conf, rtp.conf, SIP trunk setup, audio settings), see [`docs/asterisk-setup.md`](docs/asterisk-setup.md).
+
+---
+
+## Doorbell card (SIP-Core popup)
+
+The integration ships a custom Lovelace card (`hikvision-doorbell-card.js`) that shows an incoming call popup with video feed, answer/hangup buttons, and a gate opener.
+
+### Installation
+
+Add to your Lovelace resources:
+
+```yaml
+resources:
+  - url: /local/hikvision-doorbell-card.js
+    type: module
+```
+
+Copy the file from `custom_components/hikvision_sip_doorbell/www/` to your `config/www/` folder.
+
+### SIP-Core configuration
+
+The popup is driven by [SIP-Core](https://github.com/TECH7Fox/sip-hass-card). Configure it with `popup_override_component` pointing to the card, and a `popup_config` block:
+
+```yaml
+type: custom:sip-hass-card
+server: wss://your-asterisk:8089/ws
+extension: "6002"
+password: your_password
+popup_override_component: hikvision-doorbell-dialog
+popup_config:
+  camera_entity: camera.doorbell        # optional — live video in the popup
+  gate_entity: button.open_gate         # HA entity to trigger when opening the gate
+  gate_hold_time: 2                     # seconds to hold the gate button (default: 2)
+  close_on_gate: true                   # close popup and hang up after gate opens (default: false)
+```
+
+### popup_config reference
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `camera_entity` | string | — | HA camera entity to show as live feed in the popup |
+| `gate_entity` | string | — | HA entity to trigger for gate opening (`button`, `lock`, or `switch`) |
+| `gate_hold_time` | number | `2` | Seconds the gate button must be held before triggering |
+| `close_on_gate` | boolean | `false` | If `true`, hangs up and closes the popup automatically after the gate opens |
+
+### Gate opening
+
+- **From the popup (at_home)**: hold the gate button for `gate_hold_time` seconds. If `close_on_gate: true`, the call ends and the popup closes automatically 500ms after the gate opens.
+- **From mobile (away_from_home)**: press `#` on the phone keypad during an active call. Asterisk forwards the DTMF to the doorbell panel automatically — no extra configuration needed.
 
 ---
 
@@ -165,7 +249,8 @@ automation:
 
 **No call when someone rings**
 - Check that `sensor.call_state` changes to `ringing` when the doorbell is pressed
-- Enable debug logging (see below) and look for `AMI Originate` log lines
+- Run `asterisk -rx "database show routing"` — if empty, press the **Sync Routing to Asterisk** button
+- Enable debug logging (see below) and look for `AstDB routing update` log lines
 
 **SIP Domain shows `sip.example.com`**
 - Press the **Discover SIP Domain** button on the device page

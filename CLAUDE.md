@@ -13,21 +13,25 @@ A Home Assistant custom integration for the **Hikvision DS-KV6113-WPE1(C)** vide
 ## Architecture overview
 
 ```
+HA (mode/number/fallback change)
+  └── coordinator._async_write_routing_db()
+        → AMI DBPut → AstDB["routing/channel"] = "PJSIP/..." | ""
+
 Hikvision Addons MQTT addon
   └── publishes sensor state to HA (e.g. sensor.videocitofono_call_state)
 
 coordinator._async_subscribe_call_state()
   └── async_track_state_change_event on the MQTT sensor entity
-        if new state == "ringing":
-          → async_create_task(_async_originate())
-            → builds AMI Originate parameters from current mode + selected phone entity
-            → hass.services.async_call("asterisk", "send_action", {Originate})
+        → updates call_state, triggers UI update (no AMI call at ring time)
 
-Asterisk AMI
-  └── Originate → routes call to internal extension or external SIP trunk
+Asterisk [from-door] at ring time
+  └── DB(routing/channel) → Dial(${DEST},45)
+        └── two-way audio established directly
 ```
 
 Call state is tracked via `async_track_state_change_event` on the existing HA MQTT sensor entity — **not** via direct MQTT subscription. This avoids MQTT topic guessing and unique_id collisions.
+
+HA writes to AstDB **only when routing changes** (mode, phone number, fallback, options update, HA startup). Asterisk dials directly at ring time — HA is not in the call path.
 
 ---
 
@@ -133,17 +137,17 @@ Defined in `const.py → DIAL_ROUTE`:
 
 If external mode has no phone number configured (or the input_text is empty/unavailable), falls back to internal extension with a warning log.
 
-AMI Originate parameters:
+AMI DBPut parameters (written on mode/number/fallback change and at HA startup):
 ```python
-{
-    "Channel":  "PJSIP/6002"  # or "PJSIP/my-trunk/sip:+391234567890@voip.example.com"
-    "Context":  "from-door"
-    "Exten":    "6002"         # always the internal extension
-    "Priority": "1"
-    "Timeout":  "30000"
-    "CallerID": "Doorbell <6001>"
-    "Async":    "true"
-}
+# routing/channel — the channel Asterisk will Dial() at ring time
+{"Family": "routing", "Key": "channel", "Val": "PJSIP/6002"}
+# or for external:
+{"Family": "routing", "Key": "channel", "Val": "PJSIP/my-trunk/sip:+391234567890@voip.example.com"}
+# or empty string when mode=deactivated or fallback=none
+{"Family": "routing", "Key": "channel", "Val": ""}
+
+# routing/mode and routing/fallback — informational, readable via:
+# asterisk -rx "database show routing"
 ```
 
 ---

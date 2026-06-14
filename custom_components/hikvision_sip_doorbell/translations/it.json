@@ -48,6 +48,7 @@
       "init": {
         "menu_options": {
           "sip_settings": "Impostazioni SIP",
+          "enabled_modes": "Modalità attive",
           "phone_numbers": "Numeri di telefono",
           "done": "Salva e chiudi"
         }
@@ -61,11 +62,25 @@
           "sip_domain": "Dominio VoIP per chiamate esterne"
         }
       },
-      "phone_numbers": {
-        "title": "Numeri di telefono",
-        "description": "Seleziona le entità input_text che contengono i numeri da chiamare per le modalità esterne. Le entità selezionate appariranno come opzioni nel selettore 'Number to Call' nella pagina del dispositivo.",
+      "enabled_modes": {
+        "title": "Modalità attive",
+        "description": "Seleziona quali modalità operative sono disponibili. 'Disattivato' è sempre incluso.",
         "data": {
-          "phone_entities": "Entità con numero di telefono"
+          "enabled_modes": "Modalità attive"
+        }
+      },
+      "phone_numbers": {
+        "title": "Numeri di telefono — Seleziona modalità",
+        "description": "Seleziona per quale modalità configurare i numeri di telefono.",
+        "data": {
+          "mode": "Modalità"
+        }
+      },
+      "phone_numbers_for_mode": {
+        "title": "Numeri di telefono — {mode}",
+        "description": "Seleziona le entità input_text con i numeri da chiamare per questa modalità. Se configuri più numeri, potrai scegliere tra loro dalla pagina del dispositivo.",
+        "data": {
+          "mode_phone_map": "Entità con numero di telefono"
         }
       }
     },

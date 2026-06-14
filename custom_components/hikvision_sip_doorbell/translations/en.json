@@ -48,6 +48,7 @@
       "init": {
         "menu_options": {
           "sip_settings": "SIP Settings",
+          "enabled_modes": "Active Modes",
           "phone_numbers": "Phone Numbers",
           "done": "Save & Close"
         }
@@ -61,11 +62,25 @@
           "sip_domain": "VoIP domain for external calls"
         }
       },
-      "phone_numbers": {
-        "title": "Phone Numbers",
-        "description": "Select the input_text entities that contain phone numbers for external call modes. The selected entities will appear as options in the 'Number to Call' selector on the device page.",
+      "enabled_modes": {
+        "title": "Active Modes",
+        "description": "Select which operating modes are available. 'Deactivated' is always included.",
         "data": {
-          "phone_entities": "Phone number entities"
+          "enabled_modes": "Active modes"
+        }
+      },
+      "phone_numbers": {
+        "title": "Phone Numbers — Select Mode",
+        "description": "Select which mode to configure phone numbers for.",
+        "data": {
+          "mode": "Mode"
+        }
+      },
+      "phone_numbers_for_mode": {
+        "title": "Phone Numbers — {mode}",
+        "description": "Select the input_text entities with phone numbers for this mode. When multiple numbers are configured, you can choose between them from the device page.",
+        "data": {
+          "mode_phone_map": "Phone number entities"
         }
       }
     },

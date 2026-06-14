@@ -3,14 +3,14 @@
 Listens to MQTT topics published by the Hikvision Addons doorbell addon
 (https://github.com/pergolafabio/Hikvision-Addons/tree/main/doorbell).
 
-When call_state=ringing is received, the coordinator triggers an AMI Originate
-via the HA Asterisk integration (asterisk.send_action) to route the call based
-on the current mode:
+Routing is handled via Asterisk AstDB — HA writes the target channel to
+AstDB whenever the mode, phone number, or fallback changes. Asterisk reads
+it at ring time and dials directly, with no HA involvement in the call path.
 
-  at_home       → Originate to internal extension (PJSIP/<internal_extension>)
-  away_from_home → Originate to external number via SIP trunk
-  vacation      → Originate to external number via SIP trunk
-  deactivated   → No Originate — doorbell rings but call is not answered
+  at_home       → AstDB routing/channel = PJSIP/<internal_extension>
+  away_from_home → AstDB routing/channel = PJSIP/<trunk>/sip:<phone>@<domain>
+  vacation      → AstDB routing/channel = PJSIP/<trunk>/sip:<phone>@<domain>
+  deactivated   → AstDB routing/channel = "" (Asterisk hangs up)
 
 Phone numbers for external modes are resolved from mode_map stored in the
 config entry: {"away_from_home": "input_text.my_phone", ...}
@@ -33,17 +33,18 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
-    AMI_CALLER_ID_NAME,
-    AMI_CONTEXT_EXTERNAL,
-    AMI_CONTEXT_INTERNAL,
-    AMI_TIMEOUT_MS,
+    ASTDB_FAMILY,
+    ASTDB_KEY_CHANNEL,
+    ASTDB_KEY_FALLBACK,
+    ASTDB_KEY_MODE,
     AMI_WAIT_ON_FALLBACK_S,
     CONF_CALL_STATE_ENTITY,
     CONF_DEVICE_ID,
     CONF_DOORBELL_EXTENSION,
+    CONF_ENABLED_MODES,
     CONF_INTERNAL_EXTENSION,
     CONF_INTERNAL_FALLBACK,
-    CONF_PHONE_ENTITIES,
+    CONF_MODE_PHONE_MAP,
     CONF_SIP_DOMAIN,
     CONF_SIP_TRUNK,
     DEFAULT_DOORBELL_EXTENSION,
@@ -77,8 +78,9 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         self._internal_ext: str = entry.data[CONF_INTERNAL_EXTENSION]
         self._sip_trunk: str = entry.data[CONF_SIP_TRUNK]
         self._sip_domain: str = entry.data.get(CONF_SIP_DOMAIN, DEFAULT_SIP_DOMAIN)
-        self._phone_entities: list[str] = list(entry.data.get(CONF_PHONE_ENTITIES, []))
-        self._selected_phone_entity: str = ""  # entity_id chosen by the select entity
+        self._enabled_modes: list[str] = list(entry.data.get(CONF_ENABLED_MODES, DOORBELL_MODES))
+        self._mode_phone_map: dict[str, list[str]] = dict(entry.data.get(CONF_MODE_PHONE_MAP, {}))
+        self._selected_phone_entity: str = ""  # entity_id chosen per-mode, persisted in storage
         self._internal_fallback: str = entry.data.get(CONF_INTERNAL_FALLBACK, DEFAULT_INTERNAL_FALLBACK)
         self._call_state_entity: str = entry.data.get(CONF_CALL_STATE_ENTITY, "")
 
@@ -114,44 +116,49 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         return self._internal_fallback
 
     @property
-    def phone_entities(self) -> list[str]:
-        """Return friendly names of configured phone entities (used as select options)."""
+    def enabled_modes(self) -> list[str]:
+        return self._enabled_modes
+
+    def phone_entities_for_mode(self, mode: str) -> list[str]:
+        """Return friendly names of phone entities configured for the given mode."""
+        entity_ids = self._mode_phone_map.get(mode, [])
         names = []
-        for entity_id in self._phone_entities:
+        for entity_id in entity_ids:
             state = self.hass.states.get(entity_id)
-            name = (
-                state.attributes.get("friendly_name") if state else None
-            ) or entity_id
+            name = (state.attributes.get("friendly_name") if state else None) or entity_id
             names.append(name)
         return names
 
-    def _entity_id_from_friendly_name(self, name: str) -> str | None:
-        """Resolve a friendly name back to its entity_id."""
-        for entity_id in self._phone_entities:
+    def _entity_id_from_friendly_name(self, name: str, mode: str | None = None) -> str | None:
+        """Resolve a friendly name back to its entity_id, scoped to the given mode (or current)."""
+        search_mode = mode or self.mode
+        entity_ids = self._mode_phone_map.get(search_mode, [])
+        for entity_id in entity_ids:
             state = self.hass.states.get(entity_id)
-            friendly = (
-                state.attributes.get("friendly_name") if state else None
-            ) or entity_id
+            friendly = (state.attributes.get("friendly_name") if state else None) or entity_id
             if friendly == name:
                 return entity_id
         return None
 
     @property
     def selected_phone_entity(self) -> str:
-        """Return the friendly name of the currently selected phone entity."""
+        """Return the friendly name of the currently selected phone entity for the current mode."""
         if not self._selected_phone_entity:
             return ""
         state = self.hass.states.get(self._selected_phone_entity)
-        return (
-            state.attributes.get("friendly_name") if state else None
-        ) or self._selected_phone_entity
+        return (state.attributes.get("friendly_name") if state else None) or self._selected_phone_entity
 
     @property
     def number_to_call(self) -> str:
-        """Phone number from the currently selected entity, empty if none selected."""
-        if not self._selected_phone_entity:
+        """Phone number from the selected entity for the current mode, empty if none."""
+        entity_id = self._selected_phone_entity
+        if not entity_id:
+            # auto-select first configured entity for this mode
+            entity_ids = self._mode_phone_map.get(self.mode, [])
+            entity_id = entity_ids[0] if entity_ids else ""
+        if not entity_id:
             return ""
-        state = self.hass.states.get(self._selected_phone_entity)
+        state = self.hass.states.get(entity_id)
         if state is None or state.state in ("unknown", "unavailable", ""):
             return ""
         return state.state
@@ -188,9 +195,10 @@ class DoorbellCoordinator(DataUpdateCoordinator):
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
     async def async_setup(self) -> None:
-        """Load persisted state, subscribe to call_state sensor, and auto-discover sip_domain."""
+        """Load persisted state, write routing to AstDB, subscribe to call_state sensor."""
         await self._async_load_state()
         self._async_subscribe_call_state()
+        self.hass.async_create_task(self._async_write_routing_db())
         if self._sip_domain == DEFAULT_SIP_DOMAIN:
             self.hass.async_create_task(self._async_discover_sip_domain(force=False))
 
@@ -282,39 +290,38 @@ class DoorbellCoordinator(DataUpdateCoordinator):
     # ── Mode management (called by select entity) ──────────────────────────────
 
     async def async_set_mode(self, mode: str) -> None:
-        """Set the doorbell operating mode and persist it."""
-        if mode not in DOORBELL_MODES:
-            _LOGGER.warning("Unknown doorbell mode: %s", mode)
+        """Set the doorbell operating mode, persist it, and update AstDB routing."""
+        if mode not in self._enabled_modes:
+            _LOGGER.warning("Unknown or disabled doorbell mode: %s", mode)
             return
         self.mode = mode
+        self._selected_phone_entity = ""  # reset to auto-select first number for new mode
         await self._async_save_state()
+        await self._async_write_routing_db()
         self.async_update_listeners()
 
     async def async_set_selected_phone_entity(self, name_or_entity_id: str) -> None:
-        """Set the selected phone entity (accepts friendly name or entity_id) and persist it."""
+        """Set the selected phone entity (accepts friendly name or entity_id), persist, update AstDB."""
         resolved = self._entity_id_from_friendly_name(name_or_entity_id)
         self._selected_phone_entity = resolved or name_or_entity_id
         await self._async_save_state()
+        await self._async_write_routing_db()
         self.async_update_listeners()
 
     async def async_set_internal_fallback(self, fallback: str) -> None:
-        """Set the internal fallback behaviour and persist it."""
+        """Set the internal fallback behaviour, persist it, and update AstDB routing."""
         if fallback not in INTERNAL_FALLBACK_OPTIONS:
             _LOGGER.warning("Unknown internal fallback: %s", fallback)
             return
         self._internal_fallback = fallback
         await self._async_save_state()
+        await self._async_write_routing_db()
         self.async_update_listeners()
 
-    # ── AMI Originate ─────────────────────────────────────────────────────────
+    # ── AstDB routing ─────────────────────────────────────────────────────────
 
     def _is_internal_ext_registered(self) -> bool:
-        """Check if the internal extension is currently registered in Asterisk.
-
-        Looks for a binary_sensor from the Asterisk integration whose
-        unique_id ends with '<extension>_registered' and whose state is 'on'.
-        Returns True if found and registered, False if not registered or unknown.
-        """
+        """Check if the internal extension is currently registered in Asterisk."""
         from homeassistant.helpers import entity_registry as er
         ent_reg = er.async_get(self.hass)
         suffix = f"{self._internal_ext}_registered"
@@ -329,82 +336,81 @@ class DoorbellCoordinator(DataUpdateCoordinator):
                     return state.state == "on"
         return False
 
-    async def _async_originate(self) -> None:
-        """Trigger AMI Originate based on current mode."""
+    def _compute_channel(self) -> str:
+        """Return the Asterisk channel string for the current mode/state, or '' to hang up."""
         route = DIAL_ROUTE.get(self.mode, "internal")
 
         if route == "none":
-            _LOGGER.info("Doorbell ringing — mode=deactivated, no call placed")
-            return
+            return ""
 
         if route == "internal":
             if self._is_internal_ext_registered():
-                channel = f"PJSIP/{self._internal_ext}"
-                context = AMI_CONTEXT_INTERNAL
-                exten = self._internal_ext
-            else:
-                # Internal extension not registered — apply configured fallback
-                fallback = self._internal_fallback
-                _LOGGER.info(
-                    "Doorbell ringing — internal ext %s not registered, fallback=%s",
-                    self._internal_ext, fallback,
-                )
-                if fallback == "call_external":
-                    phone = self.number_to_call
-                    if phone:
-                        channel = f"{self._sip_trunk}sip:{phone}@{self._sip_domain}"
-                        context = AMI_CONTEXT_EXTERNAL
-                        exten = self._internal_ext
-                    else:
-                        _LOGGER.warning(
-                            "Doorbell ringing — fallback=call_external but no number configured, giving up"
-                        )
-                        return
-                elif fallback == "none":
-                    return
-                else:
-                    # fallback == "wait": send Originate anyway, dialplan keeps channel open
-                    channel = f"PJSIP/{self._internal_ext}"
-                    context = AMI_CONTEXT_INTERNAL
-                    exten = self._internal_ext
-        else:
-            phone = self.number_to_call
-            if not phone:
-                _LOGGER.warning(
-                    "Doorbell ringing — mode=%s requires external routing but no number configured, "
-                    "falling back to internal",
-                    self.mode,
-                )
-                channel = f"PJSIP/{self._internal_ext}"
-                context = AMI_CONTEXT_INTERNAL
-                exten = self._internal_ext
-            else:
-                channel = f"{self._sip_trunk}sip:{phone}@{self._sip_domain}"
-                context = AMI_CONTEXT_EXTERNAL
-                exten = self._internal_ext
+                return f"PJSIP/{self._internal_ext}"
+            fallback = self._internal_fallback
+            if fallback == "call_external":
+                phone = self.number_to_call
+                if phone:
+                    return f"{self._sip_trunk}sip:{phone}@{self._sip_domain}"
+                _LOGGER.warning("AstDB routing: fallback=call_external but no number configured")
+                return ""
+            if fallback == "none":
+                return ""
+            # fallback == "wait"
+            return f"PJSIP/{self._internal_ext}"
 
-        _LOGGER.info("Doorbell ringing — mode=%s, originating to %s", self.mode, channel)
+        # external mode
+        phone = self.number_to_call
+        if not phone:
+            _LOGGER.warning(
+                "AstDB routing: mode=%s requires external routing but no number configured, "
+                "falling back to internal",
+                self.mode,
+            )
+            return f"PJSIP/{self._internal_ext}"
+        return f"{self._sip_trunk}sip:{phone}@{self._sip_domain}"
 
-        caller_id = f"{AMI_CALLER_ID_NAME} <{self._doorbell_ext}>"
-        parameters = {
-            "Channel": channel,
-            "Context": context,
-            "Exten": exten,
-            "Priority": "1",
-            "Timeout": AMI_TIMEOUT_MS,
-            "CallerID": caller_id,
-            "Async": "true",
-        }
+    async def _async_write_routing_db(self) -> None:
+        """Write current routing to Asterisk AstDB via AMI DBPut.
+
+        Asterisk dialplan reads routing/channel at ring time and dials directly,
+        with no HA involvement in the call path.
+        """
+        channel = self._compute_channel()
+        _LOGGER.info("AstDB routing update — mode=%s, channel=%s", self.mode, channel or "(hangup)")
 
         try:
             await self.hass.services.async_call(
                 "asterisk",
                 "send_action",
-                {"action": "Originate", "parameters": parameters},
+                {"action": "DBPut", "parameters": {
+                    "Family": ASTDB_FAMILY,
+                    "Key": ASTDB_KEY_CHANNEL,
+                    "Val": channel,
+                }},
+                blocking=False,
+            )
+            await self.hass.services.async_call(
+                "asterisk",
+                "send_action",
+                {"action": "DBPut", "parameters": {
+                    "Family": ASTDB_FAMILY,
+                    "Key": ASTDB_KEY_MODE,
+                    "Val": self.mode,
+                }},
+                blocking=False,
+            )
+            await self.hass.services.async_call(
+                "asterisk",
+                "send_action",
+                {"action": "DBPut", "parameters": {
+                    "Family": ASTDB_FAMILY,
+                    "Key": ASTDB_KEY_FALLBACK,
+                    "Val": self._internal_fallback,
+                }},
                 blocking=False,
             )
         except Exception as exc:
-            _LOGGER.error("AMI Originate failed: %s", exc)
+            _LOGGER.error("AstDB DBPut failed: %s", exc)
 
     # ── State tracking ────────────────────────────────────────────────────────
 
@@ -426,8 +432,6 @@ class DoorbellCoordinator(DataUpdateCoordinator):
             value = new_state.state.strip()
             self.call_state = value
             self.async_update_listeners()
-            if value == "ringing":
-                self.hass.async_create_task(self._async_originate())
 
         self._unsub_listeners.append(
             async_track_state_change_event(
@@ -460,11 +464,16 @@ class DoorbellCoordinator(DataUpdateCoordinator):
     # ── Helpers ────────────────────────────────────────────────────────────────
 
     def update_entry_data(self, entry: ConfigEntry) -> None:
-        """Refresh runtime config after options flow update."""
+        """Refresh runtime config after options flow update and sync AstDB."""
         self._doorbell_ext = entry.data.get(CONF_DOORBELL_EXTENSION, self._doorbell_ext)
         self._internal_ext = entry.data.get(CONF_INTERNAL_EXTENSION, self._internal_ext)
         self._sip_trunk = entry.data.get(CONF_SIP_TRUNK, self._sip_trunk)
         self._sip_domain = entry.data.get(CONF_SIP_DOMAIN, self._sip_domain)
         self._internal_fallback = entry.data.get(CONF_INTERNAL_FALLBACK, self._internal_fallback)
-        self._phone_entities = list(entry.data.get(CONF_PHONE_ENTITIES, self._phone_entities))
+        self._enabled_modes = list(entry.data.get(CONF_ENABLED_MODES, DOORBELL_MODES))
+        self._mode_phone_map = dict(entry.data.get(CONF_MODE_PHONE_MAP, {}))
+        # if current mode was disabled, fall back to first enabled mode
+        if self.mode not in self._enabled_modes and self._enabled_modes:
+            self.mode = self._enabled_modes[0]
+        self.hass.async_create_task(self._async_write_routing_db())
         self.async_update_listeners()

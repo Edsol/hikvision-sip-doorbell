@@ -26,6 +26,7 @@ async def async_setup_entry(
     async_add_entities([
         DiscoverSipDomainButton(coordinator, entry),
         SimulateRingButton(coordinator, entry),
+        SyncRoutingDbButton(coordinator, entry),
     ])
 
 
@@ -74,6 +75,28 @@ class SimulateRingButton(ButtonEntity):
         _LOGGER.info("Simulate ring triggered manually")
         self._coordinator.call_state = "ringing"
         self._coordinator.async_update_listeners()
-        await self._coordinator._async_originate()
         self._coordinator.call_state = "idle"
         self._coordinator.async_update_listeners()
+
+
+class SyncRoutingDbButton(ButtonEntity):
+    """Button to manually write current routing to Asterisk AstDB."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:database-sync"
+    _attr_name = "Sync Routing to Asterisk"
+
+    def __init__(self, coordinator: DoorbellCoordinator, entry: ConfigEntry) -> None:
+        device_id = entry.data[CONF_DEVICE_ID]
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{DOMAIN}_{device_id}_sync_routing_db"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_id)},
+            name="Hikvision SIP Doorbell",
+            manufacturer="Hikvision",
+            model=entry.data.get("model", "DS-KV6113-WPE1(C)"),
+        )
+
+    async def async_press(self) -> None:
+        _LOGGER.info("Manual AstDB routing sync triggered")
+        await self._coordinator._async_write_routing_db()

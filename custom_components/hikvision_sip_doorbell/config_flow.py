@@ -14,19 +14,26 @@ from homeassistant.helpers.selector import (
     EntityFilterSelectorConfig,
     EntitySelector,
     EntitySelectorConfig,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
 )
 
 from .const import (
     CONF_CALL_STATE_ENTITY,
     CONF_DEVICE_ID,
     CONF_DOORBELL_EXTENSION,
+    CONF_ENABLED_MODES,
     CONF_INTERNAL_EXTENSION,
-    CONF_PHONE_ENTITIES,
+    CONF_MODE_PHONE_MAP,
     CONF_SIP_DOMAIN,
     CONF_SIP_TRUNK,
     DEFAULT_SIP_DOMAIN,
     DEFAULT_SIP_TRUNK,
+    DIAL_ROUTE,
     DOMAIN,
+    DOORBELL_MODES,
+    EXTERNAL_MODES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,6 +58,7 @@ _PHONE_ENTITIES_SELECTOR = EntitySelector(
         multiple=True,
     )
 )
+
 
 
 # ── Entity resolution helpers ─────────────────────────────────────────────────
@@ -199,13 +207,14 @@ class HikvisionSipDoorbellOptionsFlow(config_entries.OptionsFlow):
         self._entry = config_entry
         self._data: dict[str, Any] = dict(config_entry.data)
         self._errors: dict[str, str] = {}
+        self._pending_mode: str | None = None  # mode being configured in phone_numbers_for_mode step
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
         return self.async_show_menu(
             step_id="init",
-            menu_options=["sip_settings", "phone_numbers", "done"],
+            menu_options=["sip_settings", "enabled_modes", "phone_numbers", "done"],
             description_placeholders={"title": self._entry.title},
         )
 
@@ -263,23 +272,92 @@ class HikvisionSipDoorbellOptionsFlow(config_entries.OptionsFlow):
             errors=self._errors,
         )
 
-    # ── Phone Numbers ─────────────────────────────────────────────────────────
+    # ── Enabled Modes ─────────────────────────────────────────────────────────
+
+    async def async_step_enabled_modes(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        if user_input is not None:
+            selected = user_input.get(CONF_ENABLED_MODES, DOORBELL_MODES)
+            # deactivated is always included
+            if "deactivated" not in selected:
+                selected = list(selected) + ["deactivated"]
+            self._data[CONF_ENABLED_MODES] = selected
+            # remove phone map entries for modes that are no longer enabled
+            mode_map = dict(self._data.get(CONF_MODE_PHONE_MAP, {}))
+            for mode in list(mode_map.keys()):
+                if mode not in selected:
+                    del mode_map[mode]
+            self._data[CONF_MODE_PHONE_MAP] = mode_map
+            return await self.async_step_init()
+
+        current = self._data.get(CONF_ENABLED_MODES, DOORBELL_MODES)
+        return self.async_show_form(
+            step_id="enabled_modes",
+            data_schema=vol.Schema({
+                vol.Required(CONF_ENABLED_MODES, default=list(current)): SelectSelector(
+                    SelectSelectorConfig(
+                        options=DOORBELL_MODES,
+                        multiple=True,
+                        mode=SelectSelectorMode.LIST,
+                        translation_key="doorbell_mode",
+                    )
+                ),
+            }),
+        )
+
+    # ── Phone Numbers (mode picker) ───────────────────────────────────────────
 
     async def async_step_phone_numbers(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
-        if user_input is not None:
-            self._data[CONF_PHONE_ENTITIES] = user_input.get(CONF_PHONE_ENTITIES, [])
+        """Show a menu of external modes to configure phone numbers for."""
+        enabled = self._data.get(CONF_ENABLED_MODES, DOORBELL_MODES)
+        external_enabled = [m for m in enabled if m in EXTERNAL_MODES]
+
+        if not external_enabled:
             return await self.async_step_init()
+
+        if user_input is not None:
+            self._pending_mode = user_input.get("mode")
+            return await self.async_step_phone_numbers_for_mode()
 
         return self.async_show_form(
             step_id="phone_numbers",
             data_schema=vol.Schema({
-                vol.Optional(
-                    CONF_PHONE_ENTITIES,
-                    default=self._data.get(CONF_PHONE_ENTITIES, []),
-                ): _PHONE_ENTITIES_SELECTOR,
+                vol.Required("mode", default=external_enabled[0]): SelectSelector(
+                    SelectSelectorConfig(
+                        options=external_enabled,
+                        multiple=False,
+                        mode=SelectSelectorMode.LIST,
+                        translation_key="doorbell_mode",
+                    )
+                ),
             }),
+        )
+
+    async def async_step_phone_numbers_for_mode(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Configure phone number entities for a specific mode."""
+        mode = self._pending_mode
+        if mode is None:
+            return await self.async_step_init()
+
+        if user_input is not None:
+            mode_map = dict(self._data.get(CONF_MODE_PHONE_MAP, {}))
+            mode_map[mode] = user_input.get(CONF_MODE_PHONE_MAP, [])
+            self._data[CONF_MODE_PHONE_MAP] = mode_map
+            self._pending_mode = None
+            return await self.async_step_init()
+
+        current_entities = self._data.get(CONF_MODE_PHONE_MAP, {}).get(mode, [])
+        return self.async_show_form(
+            step_id="phone_numbers_for_mode",
+            data_schema=vol.Schema({
+                vol.Optional(CONF_MODE_PHONE_MAP, default=current_entities): _PHONE_ENTITIES_SELECTOR,
+            }),
+            description_placeholders={"mode": mode},
         )
 
     # ── Done ─────────────────────────────────────────────────────────────────

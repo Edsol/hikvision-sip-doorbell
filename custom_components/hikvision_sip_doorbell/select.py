@@ -21,6 +21,7 @@ from .const import (
     DOORBELL_MODES,
     INTERNAL_FALLBACK_OPTIONS,
     SUFFIX_MODE,
+    EXTERNAL_MODES,
 )
 from .coordinator import DoorbellCoordinator
 
@@ -44,7 +45,6 @@ class DoorbellModeSelect(CoordinatorEntity, SelectEntity):
     """Select entity representing the doorbell operating mode."""
 
     _attr_icon = "mdi:doorbell-video"
-    _attr_options = DOORBELL_MODES
     _attr_translation_key = "doorbell_mode"
 
     def __init__(self, coordinator: DoorbellCoordinator, entry: ConfigEntry) -> None:
@@ -58,6 +58,10 @@ class DoorbellModeSelect(CoordinatorEntity, SelectEntity):
             manufacturer="Hikvision",
             model=entry.data.get("model", "DS-KV6113-WPE1(C)"),
         )
+
+    @property
+    def options(self) -> list[str]:
+        return self.coordinator.enabled_modes
 
     @property
     def current_option(self) -> str:
@@ -104,7 +108,11 @@ class InternalFallbackSelect(CoordinatorEntity, SelectEntity):
 
 
 class NumberToCallSelect(CoordinatorEntity, SelectEntity):
-    """Select entity for choosing which input_text entity holds the phone number to call."""
+    """Select entity for choosing which phone number to call for the current mode.
+
+    Only visible when the current mode has multiple phone numbers configured.
+    Hidden (unavailable) for internal-only modes (at_home, deactivated).
+    """
 
     _attr_icon = "mdi:phone"
     _attr_entity_category = EntityCategory.CONFIG
@@ -122,13 +130,22 @@ class NumberToCallSelect(CoordinatorEntity, SelectEntity):
         )
 
     @property
+    def available(self) -> bool:
+        """Only available when the current mode has phone numbers configured."""
+        return (
+            self.coordinator.mode in EXTERNAL_MODES
+            and len(self.coordinator.phone_entities_for_mode(self.coordinator.mode)) > 0
+        )
+
+    @property
     def options(self) -> list[str]:
-        return self.coordinator.phone_entities
+        return self.coordinator.phone_entities_for_mode(self.coordinator.mode)
 
     @property
     def current_option(self) -> str | None:
         sel = self.coordinator.selected_phone_entity
-        return sel if sel in self.coordinator.phone_entities else None
+        opts = self.coordinator.phone_entities_for_mode(self.coordinator.mode)
+        return sel if sel in opts else (opts[0] if opts else None)
 
     async def async_select_option(self, option: str) -> None:
         await self.coordinator.async_set_selected_phone_entity(option)
