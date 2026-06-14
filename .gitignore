@@ -18,6 +18,10 @@ build/
 dist/
 *.egg-info/
 
+# JS build output (built by CI on release, not committed)
+node_modules/
+custom_components/hikvision_sip_doorbell/www/hikvision-doorbell-card.js
+
 # OS and editor files
 .DS_Store
 .AppleDouble

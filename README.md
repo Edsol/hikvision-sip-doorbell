@@ -197,11 +197,11 @@ Add to your Lovelace resources:
 
 ```yaml
 resources:
-  - url: /local/hikvision-doorbell-card.js
+  - url: /hacsfiles/hikvision_sip_doorbell/hikvision-doorbell-card.js
     type: module
 ```
 
-Copy the file from `custom_components/hikvision_sip_doorbell/www/` to your `config/www/` folder.
+If installed via HACS, the file is served automatically — no manual copy needed. For manual installs, copy `www/hikvision-doorbell-card.js` to your `config/www/` folder and use `/local/hikvision-doorbell-card.js` as the URL instead.
 
 ### SIP-Core configuration
 
