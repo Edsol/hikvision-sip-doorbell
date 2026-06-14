@@ -1,10 +1,11 @@
 {
   "domain": "hikvision_sip_doorbell",
-  "name": "Hikvision Doorbell",
+  "name": "Hikvision SIP Doorbell",
   "codeowners": ["@edsol"],
   "config_flow": true,
   "dependencies": ["mqtt"],
-  "documentation": "",
+  "documentation": "https://github.com/edsol/hikvision-sip-doorbell",
+  "issue_tracker": "https://github.com/edsol/hikvision-sip-doorbell/issues",
   "iot_class": "local_push",
   "requirements": [],
   "version": "0.1.0"
