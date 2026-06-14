@@ -53,6 +53,7 @@ from .const import (
     DIAL_ROUTE,
     DOMAIN,
     DOORBELL_MODES,
+    EXTERNAL_MODES,
     INTERNAL_FALLBACK_OPTIONS,
 )
 
@@ -170,27 +171,32 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         ext = self._internal_ext
         if mode == "deactivated":
             return "Videocitofono disattivato. Le chiamate verranno ignorate." if it else "Doorbell is deactivated. Calls will be ignored."
-        if mode in ("away_from_home", "vacation"):
+        if mode in EXTERNAL_MODES:
             phone = self.number_to_call
-            label = self.selected_phone_entity or "—"
+            label = self.selected_phone_entity
+            configured = self.phone_entities_for_mode(mode)
+            if not configured:
+                return f"Modalità {mode} attiva ma nessun numero configurato." if it else f"Mode {mode} active but no phone numbers configured."
             if phone:
-                return f"Chiamerà il numero esterno {phone} ({label}) via trunk SIP." if it else f"Will call {phone} ({label}) via SIP trunk."
-            return f"Modalità esterna attiva ma nessun numero impostato in '{label}'." if it else f"External mode active but no number set in '{label}'."
-        # at_home
+                suffix = f" ({label})" if label else ""
+                return f"Chiamerà il numero esterno {phone}{suffix} via trunk SIP." if it else f"Will call {phone}{suffix} via SIP trunk."
+            return f"Modalità {mode} attiva ma il numero selezionato non è disponibile." if it else f"Mode {mode} active but selected number is unavailable."
+        # at_home (or any internal mode)
         registered = self._is_internal_ext_registered()
         if registered:
             return f"Chiamerà l'interno {ext}." if it else f"Will ring indoor extension {ext}."
         fallback = self._internal_fallback
         if fallback == "call_external":
             phone = self.number_to_call
-            label = self.selected_phone_entity or "—"
+            label = self.selected_phone_entity
             if phone:
-                return f"Interno {ext} non registrato. Chiamerà il numero esterno {phone} ({label})." if it else f"Indoor extension {ext} not registered. Will call {phone} ({label})."
-            return f"Interno {ext} non registrato. Fallback esterno ma nessun numero impostato in '{label}'." if it else f"Indoor extension {ext} not registered. Fallback is call external but no number set in '{label}'."
+                suffix = f" ({label})" if label else ""
+                return f"Interno {ext} non registrato. Chiamerà il numero esterno {phone}{suffix}." if it else f"Indoor extension {ext} not registered. Will call {phone}{suffix}."
+            return f"Interno {ext} non registrato. Fallback esterno ma nessun numero configurato." if it else f"Indoor extension {ext} not registered. Fallback is call external but no number configured."
         if fallback == "none":
             return f"Interno {ext} non registrato. La chiamata verrà ignorata." if it else f"Indoor extension {ext} not registered. Call will be ignored."
         # wait
-        return f"Interno {ext} non registrato. Squilla comunque e aspetta {AMI_WAIT_ON_FALLBACK_S}s." if it else f"Indoor extension {ext} not registered. Will ring anyway and wait {AMI_WAIT_ON_FALLBACK_S}s."
+        return f"Interno {ext} non registrato. Squilla comunque e aspetta 45s." if it else f"Indoor extension {ext} not registered. Will ring anyway and wait 45s."
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -369,46 +375,41 @@ class DoorbellCoordinator(DataUpdateCoordinator):
             return f"PJSIP/{self._internal_ext}"
         return f"{self._sip_trunk}sip:{phone}@{self._sip_domain}"
 
-    async def _async_write_routing_db(self) -> None:
+    async def _async_write_routing_db(self, _retry: int = 0) -> None:
         """Write current routing to Asterisk AstDB via AMI DBPut.
 
         Asterisk dialplan reads routing/channel at ring time and dials directly,
         with no HA involvement in the call path.
+        Retries up to 3 times with 5s delay if the asterisk service is not yet available.
         """
+        if not self.hass.services.has_service("asterisk", "send_action"):
+            if _retry < 3:
+                _LOGGER.debug("AstDB write: asterisk service not ready, retrying in 5s (attempt %d/3)", _retry + 1)
+                await asyncio.sleep(5)
+                await self._async_write_routing_db(_retry + 1)
+            else:
+                _LOGGER.warning("AstDB write: asterisk service unavailable after 3 attempts — use 'Sync Routing to Asterisk' button when ready")
+            return
+
         channel = self._compute_channel()
         _LOGGER.info("AstDB routing update — mode=%s, channel=%s", self.mode, channel or "(hangup)")
 
         try:
-            await self.hass.services.async_call(
-                "asterisk",
-                "send_action",
-                {"action": "DBPut", "parameters": {
-                    "Family": ASTDB_FAMILY,
-                    "Key": ASTDB_KEY_CHANNEL,
-                    "Val": channel,
-                }},
-                blocking=False,
-            )
-            await self.hass.services.async_call(
-                "asterisk",
-                "send_action",
-                {"action": "DBPut", "parameters": {
-                    "Family": ASTDB_FAMILY,
-                    "Key": ASTDB_KEY_MODE,
-                    "Val": self.mode,
-                }},
-                blocking=False,
-            )
-            await self.hass.services.async_call(
-                "asterisk",
-                "send_action",
-                {"action": "DBPut", "parameters": {
-                    "Family": ASTDB_FAMILY,
-                    "Key": ASTDB_KEY_FALLBACK,
-                    "Val": self._internal_fallback,
-                }},
-                blocking=False,
-            )
+            for key, val in (
+                (ASTDB_KEY_CHANNEL, channel),
+                (ASTDB_KEY_MODE, self.mode),
+                (ASTDB_KEY_FALLBACK, self._internal_fallback),
+            ):
+                await self.hass.services.async_call(
+                    "asterisk",
+                    "send_action",
+                    {"action": "DBPut", "parameters": {
+                        "Family": ASTDB_FAMILY,
+                        "Key": key,
+                        "Val": val,
+                    }},
+                    blocking=False,
+                )
         except Exception as exc:
             _LOGGER.error("AstDB DBPut failed: %s", exc)
 

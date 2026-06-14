@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from homeassistant.components.button import ButtonEntity
@@ -54,7 +55,7 @@ class DiscoverSipDomainButton(ButtonEntity):
 
 
 class SimulateRingButton(ButtonEntity):
-    """Button to simulate a doorbell ring — triggers the same Originate flow as a real press."""
+    """Button to simulate a doorbell ring — updates call_state sensor for UI testing."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:doorbell"
@@ -75,6 +76,7 @@ class SimulateRingButton(ButtonEntity):
         _LOGGER.info("Simulate ring triggered manually")
         self._coordinator.call_state = "ringing"
         self._coordinator.async_update_listeners()
+        await asyncio.sleep(2)
         self._coordinator.call_state = "idle"
         self._coordinator.async_update_listeners()
 

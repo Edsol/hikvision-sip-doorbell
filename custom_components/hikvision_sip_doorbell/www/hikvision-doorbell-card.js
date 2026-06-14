@@ -119,20 +119,13 @@ class HikvisionDoorbellDialog extends LitElement {
             this.cameraEntity ||
             sipCore?.config?.popup_config?.camera_entity;
 
-        console.log("[doorbell] _ensureCameraCard entity=", entity, "cameraEntity=", this.cameraEntity, "sipCore.popup=", sipCore?.config?.popup_config?.camera_entity);
-
-        if (!entity) {
-            console.warn("[doorbell] no camera_entity configured");
-            return;
-        }
+        if (!entity) return;
 
         const hass = this.hass || sipCore?.hass;
         if (!hass) {
-            console.warn("[doorbell] hass not available yet, retrying in 500ms");
             setTimeout(() => this._ensureCameraCard(), 500);
             return;
         }
-        console.log("[doorbell] creating camera card for", entity, "hass=", !!hass);
 
         const helpers = await window.loadCardHelpers();
         this._cameraCard = await helpers.createCardElement({

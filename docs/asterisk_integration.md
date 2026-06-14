@@ -8,43 +8,64 @@ Two AMI actions are used:
 
 | Action | When | How called |
 |---|---|---|
-| `Originate` | On every `call_state=ringing` MQTT event | `hass.services.async_call("asterisk", "send_action", {...})` |
+| `DBPut` | On every routing change (mode, phone, fallback, startup) | `hass.services.async_call("asterisk", "send_action", {...})` |
 | `PJSIPShowEndpoint` | Once at startup (or on button press) | Direct AMI client from `hass.data["asterisk"]` |
 
-`Originate` is called via the HA service (fire-and-forget is fine — we don't need the response).
+`DBPut` is called via the HA service (fire-and-forget — no response needed).
 `PJSIPShowEndpoint` uses the AMI client directly because we need to read the `EndpointDetail` event response.
 
 ---
 
-## AMI Originate parameters
+## AstDB keys written by HA
 
-### Internal call (at_home mode)
+HA writes three keys under the `routing` family whenever mode, phone number, or fallback changes — and once at startup:
 
-```
-Action: Originate
-Channel: PJSIP/6002
-Context: from-door
-Exten: 6002
-Priority: 1
-Timeout: 30000
-CallerID: Doorbell <6001>
-Async: true
-```
+| Key | Value | Example |
+|---|---|---|
+| `routing/channel` | Full channel string for `Dial()`, or `""` | `PJSIP/6002` or `PJSIP/my-trunk/sip:+39123@sip.provider.com` |
+| `routing/mode` | Current mode string | `at_home` |
+| `routing/fallback` | Current internal fallback setting | `wait` |
 
-### External call (away_from_home / vacation modes)
-
-```
-Action: Originate
-Channel: PJSIP/my-trunk/sip:+391234567890@sip.myprovider.com
-Context: from-door
-Exten: 6002
-Priority: 1
-Timeout: 30000
-CallerID: Doorbell <6001>
-Async: true
+Verify via:
+```bash
+asterisk -rx "database show routing"
 ```
 
-`Exten` is always the internal extension — Asterisk uses it as the dialplan entry point in `Context`. The actual destination is determined by `Channel`.
+Expected output (example for `at_home` mode):
+```
+/routing/channel   : PJSIP/6002
+/routing/fallback  : wait
+/routing/mode      : at_home
+```
+
+If AstDB is empty after an Asterisk restart, use the **Sync Routing to Asterisk** diagnostic button in HA — this re-writes all three keys without restarting HA.
+
+---
+
+## AMI DBPut parameters
+
+Each key is written as a separate `DBPut` action:
+
+```
+Action: DBPut
+Family: routing
+Key: channel
+Val: PJSIP/6002
+```
+
+```
+Action: DBPut
+Family: routing
+Key: mode
+Val: at_home
+```
+
+```
+Action: DBPut
+Family: routing
+Key: fallback
+Val: wait
+```
 
 ---
 
@@ -52,14 +73,23 @@ Async: true
 
 ### extensions.conf
 
+Add a `[from-door]` context. Asterisk reads the routing target from AstDB and dials directly:
+
 ```ini
 [from-door]
-; Internal call — ring the indoor phone
-exten => 6002,1,Dial(PJSIP/6002,30)
-exten => 6002,n,Hangup()
+exten => _X.,1,NoOp(Doorbell ring on ${EXTEN})
+ same => n,Set(CALLERID(num)=Doorbell)
+ same => n,Set(CALLERID(name)=Doorbell)
+ same => n,Answer()
+ same => n,Set(DEST=${DB(routing/channel)})
+ same => n,GotoIf($["${DEST}" = ""]?noanswer,1)
+ same => n,Dial(${DEST},45)
+ same => n,Hangup()
+
+exten => noanswer,1,Hangup()
 ```
 
-External calls don't need a separate dialplan entry — the `Channel` in the Originate already specifies the full SIP URI via the trunk. Asterisk handles the routing through the trunk's outbound auth and registration.
+`Answer()` before `Dial()` keeps the doorbell in an established call state for up to 45 seconds, regardless of whether the destination is immediately reachable. For `deactivated` mode (empty channel), the call hangs up immediately.
 
 ### manager.conf
 
@@ -71,11 +101,9 @@ bindaddr = 0.0.0.0
 
 [homeassistant]
 secret = your_secret_here
-read = system,call,log,verbose,agent,user,config,dtmf,reporting,cdr,dialplan,originate
-write = system,call,log,verbose,agent,user,config,dtmf,reporting,cdr,dialplan,originate
+read = all
+write = all
 ```
-
-The `originate` permission is required in **both** `read` and `write`. Without it, the Originate action returns `Permission denied`.
 
 ### pjsip.conf (trunk example)
 
@@ -107,13 +135,19 @@ server_uri=sip:sip.myprovider.com
 client_uri=sip:your_username@sip.myprovider.com
 ```
 
-The `from_domain` field in the endpoint section is what `_async_discover_sip_domain()` reads via `PJSIPShowEndpoint`. If your trunk config doesn't have `from_domain`, use the **Discover SIP Domain** button and enter it manually in the Options flow instead.
+The `from_domain` field in the endpoint section is what `_async_discover_sip_domain()` reads via `PJSIPShowEndpoint`.
+
+---
+
+## DTMF gate control
+
+Pressing `#` on a mobile during an active call sends a DTMF tone via RFC 4733 (the SIP trunk standard). Asterisk automatically converts this to SIP INFO (the doorbell panel standard) when forwarding to the doorbell. No dialplan changes or configuration needed — this works out of the box.
 
 ---
 
 ## SIP domain discovery — technical detail
 
-The discovery sends `PJSIPShowEndpoint` for the configured trunk name and listens for the `EndpointDetail` AMI event. The event contains all PJSIP endpoint parameters, including `FromDomain`.
+The discovery sends `PJSIPShowEndpoint` for the configured trunk name and listens for the `EndpointDetail` AMI event.
 
 ```
 → PJSIPShowEndpoint Endpoint=my-trunk
@@ -126,23 +160,30 @@ The discovery sends `PJSIPShowEndpoint` for the configured trunk name and listen
 ← Event: EndpointDetailComplete
 ```
 
-If `FromDomain` is empty (trunk configured without it), the discovery logs a warning and the domain stays at the placeholder. The user can then set it manually via the Options flow or set `from_domain` in `pjsip.conf` and press the button again.
+If `FromDomain` is empty, the discovery logs a warning and the domain stays at the placeholder. Set `from_domain` in `pjsip.conf` and press **Discover SIP Domain** again.
 
 ---
 
 ## Troubleshooting AMI
 
-**`Permission denied` on Originate**
+**AstDB is empty after Asterisk restart**
 
-Check that `originate` is in both `read` and `write` in `manager.conf`, and that the `[general]` section comes before any user sections.
+Press the **Sync Routing to Asterisk** button on the device page. This re-runs `_async_write_routing_db()` on demand.
 
-**`Originate` never places a call**
+**`Permission denied` on DBPut**
 
-Enable HA debug logging and look for `AMI Originate` log lines. Also check the Asterisk CLI:
-```
-asterisk -rx "core show channels"
-```
+Check that `write = all` (or at minimum `write = system,call,config`) is set in `manager.conf`.
 
 **Discovery finds no `FromDomain`**
 
-Your trunk endpoint may not have `from_domain` set in `pjsip.conf`. Add it and reload PJSIP (`asterisk -rx "pjsip reload"`), then press **Discover SIP Domain** again.
+Your trunk endpoint may not have `from_domain` set in `pjsip.conf`. Add it and reload PJSIP:
+```bash
+asterisk -rx "pjsip reload"
+```
+Then press **Discover SIP Domain** again.
+
+**No call when doorbell rings**
+
+1. Check `asterisk -rx "database show routing"` — if empty, use the Sync button
+2. Enable HA debug logging and look for `AstDB routing update` lines
+3. Check Asterisk CLI: `asterisk -rx "core show channels"` during a ring
