@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/logo.png" alt="Hikvision SIP Doorbell" width="400"/>
+</p>
+
 # Hikvision SIP Doorbell
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/edsol/hikvision-sip-doorbell)
@@ -53,6 +57,9 @@ During an active call, pressing `#` on your mobile opens the gate relay on the d
 
 ### Via HACS (recommended)
 
+[![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=edsol&repository=hikvision-sip-doorbell&category=integration)
+
+Or manually:
 1. Open HACS → **Integrations** → ⋮ menu → **Custom repositories**
 2. Add this repository URL, category: **Integration**
 3. Search for **Hikvision SIP Doorbell** and install
