@@ -131,6 +131,7 @@ Add a `[from-door]` context — this is where the doorbell INVITE lands. Asteris
 exten => _X.,1,NoOp(Doorbell ring on ${EXTEN})
  same => n,Set(CALLERID(num)=Doorbell)
  same => n,Set(CALLERID(name)=Doorbell)
+ same => n,Answer()
  same => n,Set(DEST=${DB(routing/channel)})
  same => n,GotoIf($["${DEST}" = ""]?noanswer,1)
  same => n,Dial(${DEST},45)
@@ -140,6 +141,10 @@ exten => noanswer,1,Hangup()
 ```
 
 The doorbell PJSIP endpoint (`6001` in the example) must have `context=from-door` in `pjsip.conf`.
+
+> **Note:** `Answer()` before `Dial()` keeps the doorbell in an established call state for up to
+> 45 seconds regardless of whether the destination is immediately reachable. Only `deactivated`
+> mode (empty `routing/channel`) hangs up immediately.
 
 ### DTMF gate control
 
@@ -193,20 +198,29 @@ Copy the file from `custom_components/hikvision_sip_doorbell/www/` to your `conf
 
 ### SIP-Core configuration
 
-The popup is driven by [SIP-Core](https://github.com/TECH7Fox/sip-hass-card). Configure it with `popup_override_component` pointing to the card, and a `popup_config` block:
+The popup is driven by [SIP-Core](https://github.com/TECH7Fox/sip-hass-card). SIP-Core and this card are **optional** — required only for the `at_home` mode where you want to answer calls from the browser. For `away_from_home`/`vacation` modes (mobile calls), no SIP-Core setup is needed.
+
+Minimal configuration:
 
 ```yaml
 type: custom:sip-hass-card
-server: wss://your-asterisk:8089/ws
-extension: "6002"
-password: your_password
+custom_wss_url: wss://<asterisk-ip>:8089/ws
+pbx_server: <asterisk-ip>
+auto_answer: false
+sip_video: true
 popup_override_component: hikvision-doorbell-dialog
 popup_config:
-  camera_entity: camera.doorbell        # optional — live video in the popup
-  gate_entity: button.open_gate         # HA entity to trigger when opening the gate
+  camera_entity: camera.doorbell        # optional — live video feed in the popup
+  gate_entity: button.open_gate         # optional — HA entity to trigger for gate opening
   gate_hold_time: 2                     # seconds to hold the gate button (default: 2)
-  close_on_gate: true                   # close popup and hang up after gate opens (default: false)
+  close_on_gate: false                  # hang up and close popup after gate opens (default: false)
+users:
+  - extension: "6002"
+    ha_username: your_ha_username
+    password: your_sip_password
 ```
+
+> **Note:** `ice_config` and STUN servers are not needed for LAN-only setups. Omit them to keep the config minimal.
 
 ### popup_config reference
 

@@ -199,10 +199,11 @@ priv_key_file=/etc/asterisk/keys/privkey.pem
 
 ```ini
 [from-door]
-; Doorbell calls Asterisk: read target channel from AstDB and dial directly
+; Doorbell calls Asterisk: answer immediately to keep ringing, then dial target from AstDB
 exten => _X.,1,NoOp(Doorbell ring on ${EXTEN})
  same => n,Set(CALLERID(num)=Doorbell)
  same => n,Set(CALLERID(name)=Doorbell)
+ same => n,Answer()
  same => n,Set(DEST=${DB(routing/channel)})
  same => n,GotoIf($["${DEST}" = ""]?noanswer,1)
  same => n,Dial(${DEST},45)
@@ -216,8 +217,12 @@ exten => _X.,1,NoOp(OUT via Iliad: ${EXTEN})
  same => n,Hangup()
 ```
 
-> **Note:** `routing/channel` is written by HA via AMI `DBPut` whenever the mode or phone number
-> changes. On first install, HA writes it at startup. Verify with:
+> **Note:** `Answer()` is called before `Dial()` so the doorbell always enters an established call
+> state and keeps ringing for up to 45 seconds — even if the destination (e.g. SIP-Core in browser)
+> is not immediately reachable. Only `deactivated` mode (empty `routing/channel`) hangs up immediately.
+>
+> `routing/channel` is written by HA via AMI `DBPut` whenever the mode or phone number changes.
+> On first install, HA writes it at startup. Verify with:
 > `asterisk -rx "database show routing"`
 
 ### DTMF gate control
