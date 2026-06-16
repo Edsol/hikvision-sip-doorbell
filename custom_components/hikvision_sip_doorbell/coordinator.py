@@ -35,6 +35,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .const import (
     ASTDB_FAMILY,
     ASTDB_KEY_CHANNEL,
+    ASTDB_KEY_ENDPOINT,
     ASTDB_KEY_FALLBACK,
     ASTDB_KEY_MODE,
     AMI_WAIT_ON_FALLBACK_S,
@@ -342,27 +343,32 @@ class DoorbellCoordinator(DataUpdateCoordinator):
                     return state.state == "on"
         return False
 
-    def _compute_channel(self) -> str:
-        """Return the Asterisk channel string for the current mode/state, or '' to hang up."""
+    def _compute_channel(self) -> tuple[str, str]:
+        """Return (channel, endpoint) for the current mode/state.
+
+        channel  — full Asterisk channel string for Dial(), or '' to hang up
+        endpoint — PJSIP endpoint name to poll for availability before Dial()
+                   (e.g. '6002' for internal, '' for external/deactivated)
+        """
         route = DIAL_ROUTE.get(self.mode, "internal")
 
         if route == "none":
-            return ""
+            return "", ""
 
         if route == "internal":
             if self._is_internal_ext_registered():
-                return f"PJSIP/{self._internal_ext}"
+                return f"PJSIP/{self._internal_ext}", self._internal_ext
             fallback = self._internal_fallback
             if fallback == "call_external":
                 phone = self.number_to_call
                 if phone:
-                    return f"{self._sip_trunk}sip:{phone}@{self._sip_domain}"
+                    return f"{self._sip_trunk}sip:{phone}@{self._sip_domain}", ""
                 _LOGGER.warning("AstDB routing: fallback=call_external but no number configured")
-                return ""
+                return "", ""
             if fallback == "none":
-                return ""
-            # fallback == "wait"
-            return f"PJSIP/{self._internal_ext}"
+                return "", ""
+            # fallback == "wait" — pass endpoint so dialplan polls for availability
+            return f"PJSIP/{self._internal_ext}", self._internal_ext
 
         # external mode
         phone = self.number_to_call
@@ -372,8 +378,8 @@ class DoorbellCoordinator(DataUpdateCoordinator):
                 "falling back to internal",
                 self.mode,
             )
-            return f"PJSIP/{self._internal_ext}"
-        return f"{self._sip_trunk}sip:{phone}@{self._sip_domain}"
+            return f"PJSIP/{self._internal_ext}", self._internal_ext
+        return f"{self._sip_trunk}sip:{phone}@{self._sip_domain}", ""
 
     async def _async_write_routing_db(self, _retry: int = 0) -> None:
         """Write current routing to Asterisk AstDB via AMI DBPut.
@@ -391,12 +397,13 @@ class DoorbellCoordinator(DataUpdateCoordinator):
                 _LOGGER.warning("AstDB write: asterisk service unavailable after 3 attempts — use 'Sync Routing to Asterisk' button when ready")
             return
 
-        channel = self._compute_channel()
-        _LOGGER.info("AstDB routing update — mode=%s, channel=%s", self.mode, channel or "(hangup)")
+        channel, endpoint = self._compute_channel()
+        _LOGGER.info("AstDB routing update — mode=%s, channel=%s, endpoint=%s", self.mode, channel or "(hangup)", endpoint or "(none)")
 
         try:
             for key, val in (
                 (ASTDB_KEY_CHANNEL, channel),
+                (ASTDB_KEY_ENDPOINT, endpoint),
                 (ASTDB_KEY_MODE, self.mode),
                 (ASTDB_KEY_FALLBACK, self._internal_fallback),
             ):

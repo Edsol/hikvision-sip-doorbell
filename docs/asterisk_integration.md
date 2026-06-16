@@ -18,11 +18,12 @@ Two AMI actions are used:
 
 ## AstDB keys written by HA
 
-HA writes three keys under the `routing` family whenever mode, phone number, or fallback changes — and once at startup:
+HA writes four keys under the `routing` family whenever mode, phone number, or fallback changes — and once at startup:
 
 | Key | Value | Example |
 |---|---|---|
 | `routing/channel` | Full channel string for `Dial()`, or `""` | `PJSIP/6002` or `PJSIP/my-trunk/sip:+39123@sip.provider.com` |
+| `routing/endpoint` | PJSIP endpoint name to poll before `Dial()`, or `""` for external | `6002` (internal) or `""` (external/deactivated) |
 | `routing/mode` | Current mode string | `at_home` |
 | `routing/fallback` | Current internal fallback setting | `wait` |
 
@@ -73,7 +74,7 @@ Val: wait
 
 ### extensions.conf
 
-Add a `[from-door]` context. Asterisk reads the routing target from AstDB and dials directly:
+Add a `[from-door]` context. Asterisk reads routing from AstDB, plays a ringback tone, and polls the endpoint for availability before dialling:
 
 ```ini
 [from-door]
@@ -81,15 +82,29 @@ exten => _X.,1,NoOp(Doorbell ring on ${EXTEN})
  same => n,Set(CALLERID(num)=Doorbell)
  same => n,Set(CALLERID(name)=Doorbell)
  same => n,Answer()
+ same => n,Playtones(ring)
  same => n,Set(DEST=${DB(routing/channel)})
+ same => n,Set(ENDPT=${DB(routing/endpoint)})
  same => n,GotoIf($["${DEST}" = ""]?noanswer,1)
- same => n,Dial(${DEST},45)
+ same => n,Set(ATTEMPTS=0)
+ same => n(retry),GotoIf($[${ATTEMPTS} >= 9]?noanswer,1)
+ same => n,Set(ATTEMPTS=$[${ATTEMPTS} + 1])
+ same => n,GotoIf($["${ENDPT}" = ""]?dial)
+ same => n,GotoIf($["${DEVICE_STATE(PJSIP/${ENDPT})}" != "UNAVAILABLE"]?dial)
+ same => n,Wait(5)
+ same => n,Goto(retry)
+ same => n(dial),StopPlaytones()
+ same => n,Dial(${DEST},30)
  same => n,Hangup()
 
-exten => noanswer,1,Hangup()
+exten => noanswer,1,StopPlaytones()
+exten => noanswer,n,Hangup()
 ```
 
-`Answer()` before `Dial()` keeps the doorbell in an established call state for up to 45 seconds, regardless of whether the destination is immediately reachable. For `deactivated` mode (empty channel), the call hangs up immediately.
+- `Answer()` + `Playtones(ring)` keeps the doorbell ringing immediately, before the destination answers.
+- For internal calls (`routing/endpoint` = `6002`): polls endpoint state every 5s, up to 9 attempts (~45s). Dials only when `Avail` — no premature `Cancelled` sent to SIP clients.
+- For external calls (`routing/endpoint` = `""`): skips the poll and dials immediately via trunk.
+- `deactivated` mode: empty `routing/channel` → hangs up immediately.
 
 ### manager.conf
 

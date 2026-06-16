@@ -46,6 +46,7 @@ DIAL_ROUTE = {
 # AstDB routing keys — written by HA on mode/number change, read by Asterisk dialplan at ring time
 ASTDB_FAMILY = "routing"
 ASTDB_KEY_CHANNEL = "channel"       # full channel string Asterisk will Dial()
+ASTDB_KEY_ENDPOINT = "endpoint"     # PJSIP endpoint name to availability-check before Dial() (e.g. "6002"), or "" for external
 ASTDB_KEY_MODE = "mode"             # current mode label (informational)
 ASTDB_KEY_FALLBACK = "fallback"     # internal fallback value (informational)
 

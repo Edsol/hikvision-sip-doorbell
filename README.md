@@ -139,19 +139,31 @@ exten => _X.,1,NoOp(Doorbell ring on ${EXTEN})
  same => n,Set(CALLERID(num)=Doorbell)
  same => n,Set(CALLERID(name)=Doorbell)
  same => n,Answer()
+ same => n,Playtones(ring)
  same => n,Set(DEST=${DB(routing/channel)})
+ same => n,Set(ENDPT=${DB(routing/endpoint)})
  same => n,GotoIf($["${DEST}" = ""]?noanswer,1)
- same => n,Dial(${DEST},45)
+ same => n,Set(ATTEMPTS=0)
+ same => n(retry),GotoIf($[${ATTEMPTS} >= 9]?noanswer,1)
+ same => n,Set(ATTEMPTS=$[${ATTEMPTS} + 1])
+ same => n,GotoIf($["${ENDPT}" = ""]?dial)
+ same => n,GotoIf($["${DEVICE_STATE(PJSIP/${ENDPT})}" != "UNAVAILABLE"]?dial)
+ same => n,Wait(5)
+ same => n,Goto(retry)
+ same => n(dial),StopPlaytones()
+ same => n,Dial(${DEST},30)
  same => n,Hangup()
 
-exten => noanswer,1,Hangup()
+exten => noanswer,1,StopPlaytones()
+exten => noanswer,n,Hangup()
 ```
 
 The doorbell PJSIP endpoint (`6001` in the example) must have `context=from-door` in `pjsip.conf`.
 
-> **Note:** `Answer()` before `Dial()` keeps the doorbell in an established call state for up to
-> 45 seconds regardless of whether the destination is immediately reachable. Only `deactivated`
-> mode (empty `routing/channel`) hangs up immediately.
+> **Note:** `Answer()` + `Playtones(ring)` keeps the doorbell ringing while waiting for the
+> destination to become available. For internal calls (`at_home`), Asterisk polls the endpoint
+> every 5 seconds for up to ~45 seconds. For external calls, it dials immediately.
+> `deactivated` mode (empty `routing/channel`) hangs up immediately.
 
 ### DTMF gate control
 
@@ -221,6 +233,8 @@ popup_config:
   gate_entity: button.open_gate         # optional — HA entity to trigger for gate opening
   gate_hold_time: 2                     # seconds to hold the gate button (default: 2)
   close_on_gate: false                  # hang up and close popup after gate opens (default: false)
+  popup_size: large                     # "small" (~320px) or "large" (~560px, default)
+  popup_position: center                # "center" (default), "bottom-left", or "bottom-right"
 users:
   - extension: "6002"
     ha_username: your_ha_username
@@ -228,6 +242,17 @@ users:
 ```
 
 > **Note:** `ice_config` and STUN servers are not needed for LAN-only setups. Omit them to keep the config minimal.
+
+**Example — compact overlay in the bottom-right corner:**
+
+```yaml
+popup_config:
+  camera_entity: camera.doorbell
+  gate_entity: button.open_gate
+  popup_size: small
+  popup_position: bottom-right
+  close_on_gate: true
+```
 
 ### popup_config reference
 
@@ -237,6 +262,8 @@ users:
 | `gate_entity` | string | — | HA entity to trigger for gate opening (`button`, `lock`, or `switch`) |
 | `gate_hold_time` | number | `2` | Seconds the gate button must be held before triggering |
 | `close_on_gate` | boolean | `false` | If `true`, hangs up and closes the popup automatically after the gate opens |
+| `popup_size` | `small` / `large` | `large` | Width of the popup — `small` (~320px), `large` (~560px) |
+| `popup_position` | `center` / `bottom-left` / `bottom-right` | `center` | `center` uses the standard HA dialog; `bottom-left`/`bottom-right` renders a floating overlay in the corner |
 
 ### Gate opening
 

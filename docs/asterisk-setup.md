@@ -199,17 +199,30 @@ priv_key_file=/etc/asterisk/keys/privkey.pem
 
 ```ini
 [from-door]
-; Doorbell calls Asterisk: answer immediately to keep ringing, then dial target from AstDB
+; Doorbell calls Asterisk: answer immediately to keep ringing, poll endpoint availability,
+; then dial target from AstDB. routing/endpoint is "" for external calls (skip poll).
 exten => _X.,1,NoOp(Doorbell ring on ${EXTEN})
  same => n,Set(CALLERID(num)=Doorbell)
  same => n,Set(CALLERID(name)=Doorbell)
  same => n,Answer()
+ same => n,Playtones(ring)
  same => n,Set(DEST=${DB(routing/channel)})
- same => n,GotoIf($["${DEST}" = ""]?noanswer,1)
- same => n,Dial(${DEST},45)
+ same => n,Set(ENDPT=${DB(routing/endpoint)})
+ same => n,GotoIf($["${DEST}" = ""]?noanswer)
+ same => n,Set(ATTEMPTS=0)
+ same => n(retry),GotoIf($[${ATTEMPTS} >= 9]?noanswer)
+ same => n,Set(ATTEMPTS=$[${ATTEMPTS} + 1])
+ same => n,GotoIf($["${ENDPT}" = ""]?dial)
+ same => n,GotoIf($["${DEVICE_STATE(PJSIP/${ENDPT})}" != "UNAVAILABLE"]?dial)
+ same => n,Wait(5)
+ same => n,Goto(retry)
+ same => n(dial),NoOp(Dialling ${DEST})
+ same => n,StopPlaytones()
+ same => n,Dial(${DEST},30)
  same => n,Hangup()
 
-exten => noanswer,1,Hangup()
+exten => noanswer,1,StopPlaytones()
+exten => noanswer,n,Hangup()
 
 [out-iliad]
 exten => _X.,1,NoOp(OUT via Iliad: ${EXTEN})
@@ -217,12 +230,15 @@ exten => _X.,1,NoOp(OUT via Iliad: ${EXTEN})
  same => n,Hangup()
 ```
 
-> **Note:** `Answer()` is called before `Dial()` so the doorbell always enters an established call
-> state and keeps ringing for up to 45 seconds — even if the destination (e.g. SIP-Core in browser)
-> is not immediately reachable. Only `deactivated` mode (empty `routing/channel`) hangs up immediately.
+> **How it works:**
+> - `Answer()` + `Playtones(ring)` keeps the doorbell ringing immediately, before any destination answers.
+> - For internal calls (`routing/endpoint` = e.g. `6002`): polls endpoint state with `DEVICE_STATE` every 5s, up to 9 attempts (~45s). Dials only when the endpoint is available — prevents premature `Cancelled` being sent to SIP clients like SIP-Core.
+> - For external calls (`routing/endpoint` = `""`): skips the poll and dials immediately via trunk.
+> - `deactivated` mode: `routing/channel` is empty → hangs up immediately.
+> - GotoIf labels use `?label` syntax (no `,1`) — required for labels within the same extension.
 >
-> `routing/channel` is written by HA via AMI `DBPut` whenever the mode or phone number changes.
-> On first install, HA writes it at startup. Verify with:
+> `routing/channel` and `routing/endpoint` are written by HA via AMI `DBPut` whenever mode,
+> phone number, or fallback changes. Verify with:
 > `asterisk -rx "database show routing"`
 
 ### DTMF gate control
@@ -295,3 +311,7 @@ Under **Video/Audio → Audio**:
 | Call drops after ~30s | `timers=yes` on Iliad trunk triggers session-expires | Set `timers=no` on Iliad trunk |
 | DTMF `#` not opening gate | Endpoint mode mismatch (rfc4733 vs info) | Asterisk converts automatically — no config needed; verify `dtmf_mode` on both endpoints |
 | AstDB empty after Asterisk restart | HA not yet connected when Asterisk starts | Use "Sync Routing to Asterisk" button in HA diagnostics to force a DBPut |
+| Doorbell sounds busy when SIP-Core not open | `Dial(PJSIP/6002)` fails immediately with CHANUNAVAIL if endpoint not registered | Use `DEVICE_STATE` poll loop in dialplan — only dial when endpoint is `Avail` |
+| SIP-Core popup opens and closes immediately | `Dial()` on unavailable endpoint sends `Cancelled` to registered SIP clients | Same fix — poll with `DEVICE_STATE` before dialling |
+| GotoIf label jump fails (`invalid extension`) | `?label,1` syntax tells Asterisk to find an extension named `label`, not a dialplan label | Use `?label` (no `,1`) for jumps within the same extension |
+| Doorbell called wrong extension directly | Number Settings on Hikvision panel pointed to `6002` instead of `6001` | Set SIP Number to `6001` (the endpoint with `context=from-door`) |

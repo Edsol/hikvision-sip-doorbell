@@ -3,11 +3,16 @@ import { property, state } from "lit/decorators.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+type PopupSize = "small" | "large";
+type PopupPosition = "center" | "bottom-left" | "bottom-right";
+
 interface PopupConfig {
     camera_entity?: string;
     gate_entity?: string;
     gate_hold_time?: number;
     close_on_gate?: boolean;
+    popup_size?: PopupSize;
+    popup_position?: PopupPosition;
 }
 
 interface SipCoreConfig {
@@ -24,6 +29,7 @@ interface SipCoreInstance {
     RTCSession?: SipCoreRTCSession;
     incomingAudio?: HTMLAudioElement;
     outgoingAudio?: HTMLAudioElement;
+    remoteAudioStream?: MediaStream;
     answerCall(): Promise<void>;
     endCall(): void;
 }
@@ -220,10 +226,11 @@ class HikvisionDoorbellDialog extends LitElement {
 
     private _toggleAudio(): void {
         if (!this._sipCore) return;
-        const audio = this._sipCore.incomingAudio;
-        if (audio) {
-            audio.muted = !audio.muted;
-            this._audioHeld = audio.muted;
+        const stream = this._sipCore.remoteAudioStream;
+        if (stream) {
+            const enabled = this._audioHeld; // if was muted, re-enable
+            stream.getAudioTracks().forEach(t => { t.enabled = enabled; });
+            this._audioHeld = !enabled;
         }
         this.requestUpdate();
     }
@@ -354,9 +361,47 @@ class HikvisionDoorbellDialog extends LitElement {
         `;
     }
 
+    private get _popupSize(): PopupSize {
+        return this._sipCore?.config?.popup_config?.popup_size ?? "large";
+    }
+
+    private get _popupPosition(): PopupPosition {
+        return this._sipCore?.config?.popup_config?.popup_position ?? "center";
+    }
+
     render(): TemplateResult {
+        const position = this._popupPosition;
+        const isAnchored = position !== "center";
+
+        if (isAnchored) {
+            return html`
+                <div class="anchored-overlay ${position} size-${this._popupSize} ${this._open ? "open" : ""}">
+                    <div class="anchored-dialog">
+                        <div class="anchored-header">
+                            <span class="title ${this._callState}">
+                                ${this._callState === "ringing" ? html`<ha-icon class="ring-icon" icon="mdi:phone-ring"></ha-icon> Chiamata in arrivo` :
+                                  this._callState === "active"  ? html`<ha-icon icon="mdi:phone-in-talk"></ha-icon> In chiamata` :
+                                  this._callState === "ended"   ? html`<ha-icon icon="mdi:phone-hangup"></ha-icon> Chiamata terminata` :
+                                  html`<ha-icon icon="mdi:doorbell-video"></ha-icon> Videocitofono`}
+                            </span>
+                            <ha-icon-button @click=${this._close}>
+                                <ha-icon icon="mdi:close"></ha-icon>
+                            </ha-icon-button>
+                        </div>
+                        <div class="content">
+                            <div class="camera-wrap">
+                                ${this._cameraCard ?? html`<div class="camera-placeholder"><ha-icon icon="mdi:camera-off"></ha-icon></div>`}
+                            </div>
+                            ${this._renderBottomBar()}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
         return html`
-            <ha-dialog ?open=${this._open} @closed=${this._close} hideActions flexContent>
+            <ha-dialog ?open=${this._open} @closed=${this._close} hideActions flexContent
+                class="size-${this._popupSize}">
                 <ha-dialog-header slot="heading">
                     <ha-icon-button slot="navigationIcon" @click=${this._close}>
                         <ha-icon icon="mdi:close"></ha-icon>
@@ -381,9 +426,43 @@ class HikvisionDoorbellDialog extends LitElement {
 
     static get styles(): CSSResult {
         return css`
+            /* ── Center dialog (default) ── */
             ha-dialog {
                 --mdc-dialog-min-width: min(560px, 96vw);
                 --dialog-content-padding: 0;
+            }
+            ha-dialog.size-small {
+                --mdc-dialog-min-width: min(320px, 96vw);
+            }
+
+            /* ── Anchored overlay (bottom-left / bottom-right) ── */
+            .anchored-overlay {
+                display: none;
+                position: fixed;
+                bottom: 24px;
+                z-index: 9999;
+                pointer-events: none;
+            }
+            .anchored-overlay.open {
+                display: block;
+                pointer-events: auto;
+            }
+            .anchored-overlay.bottom-left  { left: 24px; }
+            .anchored-overlay.bottom-right { right: 24px; }
+            .anchored-dialog {
+                background: var(--card-background-color, #fff);
+                border-radius: 12px;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+                overflow: hidden;
+                width: 320px;
+            }
+            .anchored-overlay.size-large .anchored-dialog { width: 420px; }
+            .anchored-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 8px 8px 8px 16px;
+                border-bottom: 1px solid var(--divider-color);
             }
             .title {
                 display: flex;
