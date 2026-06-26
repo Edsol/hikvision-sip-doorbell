@@ -150,7 +150,7 @@ exten => _X.,1,NoOp(Doorbell ring on ${EXTEN})
  same => n,GotoIf($["${DEVICE_STATE(PJSIP/${ENDPT})}" != "UNAVAILABLE"]?dial)
  same => n,Wait(5)
  same => n,Goto(retry)
- same => n(dial),StopPlaytones()
+ same => n(dial),NoOp(Dialling ${DEST})
  same => n,Dial(${DEST},30)
  same => n,Hangup()
 
@@ -160,10 +160,7 @@ exten => noanswer,n,Hangup()
 
 The doorbell PJSIP endpoint (`6001` in the example) must have `context=from-door` in `pjsip.conf`.
 
-> **Note:** `Answer()` + `Playtones(ring)` keeps the doorbell ringing while waiting for the
-> destination to become available. For internal calls (`at_home`), Asterisk polls the endpoint
-> every 5 seconds for up to ~45 seconds. For external calls, it dials immediately.
-> `deactivated` mode (empty `routing/channel`) hangs up immediately.
+> **Note:** `Answer()` + `Playtones(ring)` keeps the doorbell ringing for the entire setup phase — including the 13s Iliad delay for external calls. `Dial()` stops the tones automatically when the call is answered. `StopPlaytones()` is only called on the `noanswer` path. For internal calls (`at_home`), Asterisk polls the endpoint every 5 seconds for up to ~45 seconds before dialling.
 
 ### DTMF gate control
 
@@ -269,6 +266,25 @@ popup_config:
 
 - **From the popup (at_home)**: hold the gate button for `gate_hold_time` seconds. If `close_on_gate: true`, the call ends and the popup closes automatically 500ms after the gate opens.
 - **From mobile (away_from_home)**: press `#` on the phone keypad during an active call. Asterisk forwards the DTMF to the doorbell panel automatically — no extra configuration needed.
+
+---
+
+## Blueprints
+
+### Ring a media player on doorbell
+
+Play a sound on a Nest Mini, Sonos, or any HA media player when the doorbell rings — and stop it automatically when the call ends.
+
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fedsol%2Fhikvision-sip-doorbell%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fhikvision_sip_doorbell%2Fring_media_player.yaml)
+
+Or import manually: **Settings → Automations → Blueprints → Import** and paste the URL above.
+
+The blueprint lets you configure:
+- Which media player(s) to ring
+- The sound file URL (default: `/local/doorbell.mp3` — place the file in `config/www/`)
+- The playback volume
+
+The sound stops automatically when the call is answered, dismissed, or times out.
 
 ---
 

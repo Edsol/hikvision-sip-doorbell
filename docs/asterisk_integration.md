@@ -93,7 +93,7 @@ exten => _X.,1,NoOp(Doorbell ring on ${EXTEN})
  same => n,GotoIf($["${DEVICE_STATE(PJSIP/${ENDPT})}" != "UNAVAILABLE"]?dial)
  same => n,Wait(5)
  same => n,Goto(retry)
- same => n(dial),StopPlaytones()
+ same => n(dial),NoOp(Dialling ${DEST})
  same => n,Dial(${DEST},30)
  same => n,Hangup()
 

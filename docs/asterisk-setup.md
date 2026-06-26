@@ -217,7 +217,6 @@ exten => _X.,1,NoOp(Doorbell ring on ${EXTEN})
  same => n,Wait(5)
  same => n,Goto(retry)
  same => n(dial),NoOp(Dialling ${DEST})
- same => n,StopPlaytones()
  same => n,Dial(${DEST},30)
  same => n,Hangup()
 
@@ -315,3 +314,4 @@ Under **Video/Audio → Audio**:
 | SIP-Core popup opens and closes immediately | `Dial()` on unavailable endpoint sends `Cancelled` to registered SIP clients | Same fix — poll with `DEVICE_STATE` before dialling |
 | GotoIf label jump fails (`invalid extension`) | `?label,1` syntax tells Asterisk to find an extension named `label`, not a dialplan label | Use `?label` (no `,1`) for jumps within the same extension |
 | Doorbell called wrong extension directly | Number Settings on Hikvision panel pointed to `6002` instead of `6001` | Set SIP Number to `6001` (the endpoint with `context=from-door`) |
+| No ringback during external call (Iliad 13s delay) | `StopPlaytones()` placed before `Dial()` in `(dial)` label — tone stopped before trunk answered | Remove `StopPlaytones()` from `(dial)`; keep only on `noanswer`. `Dial()` stops tones automatically on answer |

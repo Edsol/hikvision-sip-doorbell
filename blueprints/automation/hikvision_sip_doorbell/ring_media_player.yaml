@@ -1,0 +1,77 @@
+blueprint:
+  name: Hikvision Doorbell — Ring media player
+  description: >
+    Play a sound on one or more media players when the Hikvision doorbell rings,
+    and stop it automatically when the call ends (answered, dismissed, or idle).
+  domain: automation
+  input:
+    call_state_sensor:
+      name: Call state sensor
+      description: The "Call State" sensor created by the Hikvision SIP Doorbell integration.
+      selector:
+        entity:
+          integration: hikvision_sip_doorbell
+          domain: sensor
+    media_players:
+      name: Media player(s)
+      description: One or more media players to ring (e.g. Nest Mini, Sonos).
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+    sound_url:
+      name: Sound URL
+      description: >
+        URL of the MP3/WAV file to play. Must be reachable by the media player.
+        Use a local path like /local/doorbell.mp3 (place the file in config/www/)
+        or a public URL.
+      default: /local/doorbell.mp3
+      selector:
+        text:
+    volume:
+      name: Volume
+      description: Playback volume (0.0 – 1.0). Leave blank to keep the current volume.
+      default: 0.5
+      selector:
+        number:
+          min: 0.0
+          max: 1.0
+          step: 0.05
+          mode: slider
+
+trigger:
+  - platform: state
+    entity_id: !input call_state_sensor
+    to: ringing
+    id: ringing
+  - platform: state
+    entity_id: !input call_state_sensor
+    from: ringing
+    id: stop
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: ringing
+        sequence:
+          - service: media_player.volume_set
+            target:
+              entity_id: !input media_players
+            data:
+              volume_level: !input volume
+          - service: media_player.play_media
+            target:
+              entity_id: !input media_players
+            data:
+              media_content_id: !input sound_url
+              media_content_type: music
+      - conditions:
+          - condition: trigger
+            id: stop
+        sequence:
+          - service: media_player.media_stop
+            target:
+              entity_id: !input media_players
+
+mode: restart
