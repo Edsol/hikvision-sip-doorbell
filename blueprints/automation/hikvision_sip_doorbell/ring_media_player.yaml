@@ -66,12 +66,10 @@ blueprint:
 
     tts_engine:
       name: TTS engine
-      description: >
-        The TTS service to use. Common options: tts.cloud_say (Nabu Casa),
-        tts.piper (local), tts.google_translate_say.
-      default: tts.cloud_say
+      description: The TTS engine entity to use for speaking the message.
       selector:
-        text:
+        entity:
+          domain: tts
 
     tts_message:
       name: TTS message
@@ -132,9 +130,10 @@ action:
                         - condition: template
                           value_template: "{{ use_tts }}"
                       sequence:
-                        - service: "{{ tts_engine }}"
+                        - service: tts.speak
                           data:
-                            entity_id: !input media_players
+                            entity_id: "{{ tts_engine }}"
+                            media_player_entity_id: !input media_players
                             message: "{{ tts_message }}"
                   default:
                     - service: media_player.play_media
