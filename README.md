@@ -275,9 +275,12 @@ popup_config:
 
 Play a sound on a Nest Mini, Sonos, or any HA media player when the doorbell rings — and stop it automatically when the call ends.
 
-[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fedsol%2Fhikvision-sip-doorbell%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fhikvision_sip_doorbell%2Fring_media_player.yaml)
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2FEdsol%2Fhikvision-sip-doorbell%2Fmain%2Fblueprints%2Fautomation%2Fhikvision_sip_doorbell%2Fring_media_player.yaml)
 
-Or import manually: **Settings → Automations → Blueprints → Import** and paste the URL above.
+Or import manually: **Settings → Automations → Blueprints → Import** and paste:
+```
+https://raw.githubusercontent.com/Edsol/hikvision-sip-doorbell/main/blueprints/automation/hikvision_sip_doorbell/ring_media_player.yaml
+```
 
 The blueprint lets you configure:
 - Which media player(s) to ring
