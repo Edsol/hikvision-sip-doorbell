@@ -117,23 +117,17 @@ action:
                 - condition: template
                   value_template: "{{ repeat.index * repeat_interval <= max_duration }}"
               sequence:
-                - choose:
-                    - conditions:
-                        - condition: template
-                          value_template: "{{ use_tts }}"
-                      sequence:
-                        - service: tts.google_translate_say
-                          target:
-                            entity_id: !input media_players
-                          data:
-                            message: "{{ tts_message }}"
-                  default:
-                    - service: media_player.play_media
-                      target:
-                        entity_id: !input media_players
-                      data:
-                        media_content_id: "{{ sound_url }}"
-                        media_content_type: music
+                - service: media_player.play_media
+                  target:
+                    entity_id: !input media_players
+                  data:
+                    media_content_type: music
+                    media_content_id: >
+                      {% if use_tts %}
+                        media-source://tts/tts.google_translate_say?message={{ tts_message | urlencode }}&language=it
+                      {% else %}
+                        {{ sound_url }}
+                      {% endif %}
                 - delay:
                     seconds: "{{ repeat_interval }}"
 
