@@ -64,6 +64,15 @@ blueprint:
       selector:
         boolean:
 
+    tts_engine:
+      name: TTS engine
+      description: >
+        The TTS service to use. Common options: tts.cloud_say (Nabu Casa),
+        tts.piper (local), tts.google_translate_say.
+      default: tts.cloud_say
+      selector:
+        text:
+
     tts_message:
       name: TTS message
       description: Text to speak when "Use TTS" is enabled.
@@ -83,6 +92,7 @@ blueprint:
 
 variables:
   use_tts: !input use_tts
+  tts_engine: !input tts_engine
   tts_message: !input tts_message
   sound_url: !input sound_url
   max_duration: !input max_duration
@@ -117,17 +127,22 @@ action:
                 - condition: template
                   value_template: "{{ repeat.index * repeat_interval <= max_duration }}"
               sequence:
-                - service: media_player.play_media
-                  target:
-                    entity_id: !input media_players
-                  data:
-                    media_content_type: music
-                    media_content_id: >
-                      {% if use_tts %}
-                        media-source://tts/tts.google_translate_say?message={{ tts_message | urlencode }}&language=it
-                      {% else %}
-                        {{ sound_url }}
-                      {% endif %}
+                - choose:
+                    - conditions:
+                        - condition: template
+                          value_template: "{{ use_tts }}"
+                      sequence:
+                        - service: "{{ tts_engine }}"
+                          data:
+                            entity_id: !input media_players
+                            message: "{{ tts_message }}"
+                  default:
+                    - service: media_player.play_media
+                      target:
+                        entity_id: !input media_players
+                      data:
+                        media_content_type: music
+                        media_content_id: "{{ sound_url }}"
                 - delay:
                     seconds: "{{ repeat_interval }}"
 
