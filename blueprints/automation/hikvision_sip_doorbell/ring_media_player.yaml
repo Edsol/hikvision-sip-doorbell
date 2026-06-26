@@ -4,6 +4,7 @@ blueprint:
     Play a sound on one or more media players when the Hikvision doorbell rings,
     repeating until the call ends or a maximum duration is reached.
     Optionally use a TTS message instead of a sound file.
+    Supports custom conditions to restrict when ringing occurs (e.g. by mode, time, or any entity state).
   domain: automation
   input:
     call_state_sensor:
@@ -96,6 +97,17 @@ blueprint:
       selector:
         text:
 
+    conditions:
+      name: Conditions (optional)
+      description: >
+        Additional conditions that must be true before ringing.
+        Use this to restrict ringing by doorbell mode, time of day, presence, or any entity state.
+        Example: only ring when the doorbell mode is "away_from_home", or only between 08:00 and 22:00.
+        Leave empty to always ring.
+      default: []
+      selector:
+        condition:
+
 variables:
   use_tts: !input use_tts
   tts_engine: !input tts_engine
@@ -120,6 +132,7 @@ action:
           - condition: trigger
             id: ringing
         sequence:
+          - condition: !input conditions
           - service: media_player.volume_set
             target:
               entity_id: !input media_players
