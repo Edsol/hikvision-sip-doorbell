@@ -2,7 +2,8 @@ blueprint:
   name: Hikvision Doorbell — Ring media player
   description: >
     Play a sound on one or more media players when the Hikvision doorbell rings,
-    and stop it automatically when the call ends (answered, dismissed, or idle).
+    repeating until the call ends or a maximum duration is reached.
+    Optionally use a TTS message instead of a sound file.
   domain: automation
   input:
     call_state_sensor:
@@ -12,25 +13,18 @@ blueprint:
         entity:
           integration: hikvision_sip_doorbell
           domain: sensor
+
     media_players:
       name: Media player(s)
-      description: One or more media players to ring (e.g. Nest Mini, Sonos).
+      description: One or more media players to ring (e.g. Google Home Mini, Sonos).
       selector:
         entity:
           domain: media_player
           multiple: true
-    sound_url:
-      name: Sound URL
-      description: >
-        URL of the MP3/WAV file to play. Must be reachable by the media player.
-        Use a local path like /local/doorbell.mp3 (place the file in config/www/)
-        or a public URL.
-      default: /local/doorbell.mp3
-      selector:
-        text:
+
     volume:
       name: Volume
-      description: Playback volume (0.0 – 1.0). Leave blank to keep the current volume.
+      description: Playback volume (0.0 – 1.0).
       default: 0.5
       selector:
         number:
@@ -38,6 +32,61 @@ blueprint:
           max: 1.0
           step: 0.05
           mode: slider
+
+    repeat_interval:
+      name: Repeat interval (seconds)
+      description: How many seconds to wait between each ring. Should be longer than the sound duration.
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+          unit_of_measurement: s
+
+    max_duration:
+      name: Maximum duration (seconds)
+      description: Stop ringing after this many seconds even if the call is still active.
+      default: 60
+      selector:
+        number:
+          min: 5
+          max: 300
+          step: 5
+          unit_of_measurement: s
+
+    use_tts:
+      name: Use TTS instead of sound file
+      description: >
+        If enabled, speak a message instead of playing an MP3.
+        The sound URL below will be ignored.
+      default: false
+      selector:
+        boolean:
+
+    tts_message:
+      name: TTS message
+      description: Text to speak when "Use TTS" is enabled.
+      default: "Qualcuno al cancello"
+      selector:
+        text:
+
+    sound_url:
+      name: Sound URL
+      description: >
+        URL of the MP3/WAV file to play. Must be reachable by the media player.
+        Use a local path like /local/doorbell.mp3 (place the file in config/www/)
+        or a public URL. Ignored if "Use TTS" is enabled.
+      default: "https://www.1800doorbell.com/wp-content/uploads/sounds/ERA-1-Sound-Ding-Dong.mp3"
+      selector:
+        text:
+
+variables:
+  use_tts: !input use_tts
+  tts_message: !input tts_message
+  sound_url: !input sound_url
+  max_duration: !input max_duration
+  repeat_interval: !input repeat_interval
 
 trigger:
   - platform: state
@@ -60,12 +109,34 @@ action:
               entity_id: !input media_players
             data:
               volume_level: !input volume
-          - service: media_player.play_media
-            target:
-              entity_id: !input media_players
-            data:
-              media_content_id: !input sound_url
-              media_content_type: music
+          - repeat:
+              while:
+                - condition: state
+                  entity_id: !input call_state_sensor
+                  state: ringing
+                - condition: template
+                  value_template: "{{ repeat.index * repeat_interval <= max_duration }}"
+              sequence:
+                - choose:
+                    - conditions:
+                        - condition: template
+                          value_template: "{{ use_tts }}"
+                      sequence:
+                        - service: tts.google_translate_say
+                          target:
+                            entity_id: !input media_players
+                          data:
+                            message: "{{ tts_message }}"
+                  default:
+                    - service: media_player.play_media
+                      target:
+                        entity_id: !input media_players
+                      data:
+                        media_content_id: "{{ sound_url }}"
+                        media_content_type: music
+                - delay:
+                    seconds: "{{ repeat_interval }}"
+
       - conditions:
           - condition: trigger
             id: stop
