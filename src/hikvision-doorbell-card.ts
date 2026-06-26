@@ -629,6 +629,12 @@ class HikvisionDoorbellButton extends LitElement {
 
 customElements.define("hikvision-doorbell-button", HikvisionDoorbellButton);
 
+console.info(
+    "%c HIKVISION-DOORBELL-CARD %c v0.1.0 ",
+    "color: white; background: #025a9e; font-weight: bold; padding: 2px 4px; border-radius: 3px 0 0 3px;",
+    "color: #025a9e; background: #e8f4fd; font-weight: bold; padding: 2px 4px; border-radius: 0 3px 3px 0;"
+);
+
 // ── Ensure dialog exists in DOM for SIP-Core auto-popup ───────────────────────
 window.addEventListener("load", () => {
     if (!document.querySelector("hikvision-doorbell-dialog")) {
