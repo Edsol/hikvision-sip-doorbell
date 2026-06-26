@@ -66,10 +66,18 @@ blueprint:
 
     tts_engine:
       name: TTS engine
-      description: The TTS engine entity to use for speaking the message.
+      description: The TTS service to use for speaking the message.
+      default: tts.cloud_say
       selector:
-        entity:
-          domain: tts
+        select:
+          options:
+            - label: "Nabu Casa Cloud TTS (tts.cloud_say)"
+              value: tts.cloud_say
+            - label: "Piper local TTS (tts.piper)"
+              value: tts.piper
+            - label: "Google Translate TTS (tts.google_translate_say)"
+              value: tts.google_translate_say
+          custom_value: true
 
     tts_message:
       name: TTS message
