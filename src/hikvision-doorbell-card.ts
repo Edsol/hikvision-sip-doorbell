@@ -87,6 +87,7 @@ class HikvisionDoorbellDialog extends LitElement {
 
     connectedCallback(): void {
         super.connectedCallback();
+        console.debug("[hikvision-dialog] connectedCallback — registering listeners");
         window.addEventListener("sipcore-update", this._onSipUpdate);
         window.addEventListener("sipcore-call-started", this._onCallStarted);
         window.addEventListener("sipcore-call-ended", this._onCallEnded);
@@ -111,6 +112,7 @@ class HikvisionDoorbellDialog extends LitElement {
     }
 
     private _handleCallStarted(): void {
+        console.debug("[hikvision-dialog] sipcore-call-started received, opening popup");
         this._sipCore = window.sipCore ?? null;
         if (!this.cameraEntity) {
             this.cameraEntity = this._sipCore?.config?.popup_config?.camera_entity ?? null;
@@ -717,7 +719,10 @@ customElements.define("hikvision-doorbell-button-editor", HikvisionDoorbellButto
 // (HA loads cards asynchronously — window.load may fire before cards mount)
 function _ensureDialog(): void {
     if (!document.querySelector("hikvision-doorbell-dialog")) {
+        console.debug("[hikvision-dialog] creating dialog element in DOM");
         document.body.appendChild(document.createElement("hikvision-doorbell-dialog"));
+    } else {
+        console.debug("[hikvision-dialog] dialog already in DOM, skipping");
     }
 }
 if (document.body) {
