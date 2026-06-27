@@ -418,11 +418,11 @@ class HikvisionDoorbellDialog extends LitElement {
             `;
         }
 
-        const dialogWidth = this._popupSize === "small" ? "min(360px, 92vw)" : "min(560px, 92vw)";
+        const dialogWidth = this._popupSize === "small" ? "360px" : "560px";
         return html`
             <ha-dialog ?open=${this._open} @closed=${this._close} hideActions flexContent
                 class="size-${this._popupSize}"
-                style="--mdc-dialog-min-width:${dialogWidth};--mdc-dialog-max-width:${dialogWidth};--dialog-surface-width:${dialogWidth};">
+                style="--ha-dialog-width-md:${dialogWidth};--ha-dialog-width-sm:${dialogWidth};--mdc-dialog-min-width:min(${dialogWidth}, 92vw);--mdc-dialog-max-width:min(${dialogWidth}, 92vw);--dialog-surface-width:min(${dialogWidth}, 92vw);">
                 <ha-dialog-header slot="heading">
                     <ha-icon-button slot="navigationIcon" @click=${this._close}>
                         <ha-icon icon="mdi:close"></ha-icon>
