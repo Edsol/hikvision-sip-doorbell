@@ -319,6 +319,30 @@ automation:
 - Run `asterisk -rx "database show routing"` — if empty, press the **Sync Routing to Asterisk** button
 - Enable debug logging (see below) and look for `AstDB routing update` log lines
 
+**SIP-Core not connecting / extension 6002 not registered**
+
+SIP-Core is a browser-side WebRTC client — it only registers when a page with `sip-hass-card` is open.
+
+1. **Accept the Asterisk WSS certificate** — open `https://<asterisk-ip>:8089/ws` in the browser, click *Advanced → Proceed*. Without this the WebSocket connection is silently blocked.
+2. **Check `ha_username`** — SIP-Core matches this against the HA user's **display name** (not the login username), and it is **case-sensitive**. Open the browser console, filter by `sip`, and look for:
+   ```
+   No matching SIP user found for Home Assistant user: <Name>
+   ```
+   Use exactly that name (e.g. `Edoardo`, not `edoardo`) in your SIP-Core config:
+   ```yaml
+   users:
+     - extension: "6002"
+       ha_username: Edoardo   # must match the HA display name exactly
+       password: YOUR_PASSWORD
+   ```
+   Alternatively, omit `ha_username` entirely — with a single user in the list SIP-Core uses it as fallback.
+3. **Verify registration** — after the page loads run `asterisk -rx "pjsip show contacts"` and confirm `6002` appears.
+
+**`at_home` mode: call dismissed after a few seconds with no popup**
+- Extension `6002` is `Unavailable` in Asterisk — SIP-Core is not connected (see above)
+- Asterisk polls for availability every 5 s up to 9 attempts, then the doorbell times out and sends `dismissed`
+- Check the **SIP Client Connected** diagnostic sensor on the device page — it mirrors `binary_sensor.6002_registered` from the Asterisk integration
+
 **SIP Domain shows `sip.example.com`**
 - Press the **Discover SIP Domain** button on the device page
 - If it still fails, verify that the Asterisk integration is connected and the trunk name is correct
