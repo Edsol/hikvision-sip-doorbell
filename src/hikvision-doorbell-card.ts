@@ -443,11 +443,13 @@ class HikvisionDoorbellDialog extends LitElement {
         return css`
             /* ── Center dialog (default) ── */
             ha-dialog {
-                --mdc-dialog-min-width: min(560px, 96vw);
+                --mdc-dialog-min-width: min(560px, 92vw);
+                --mdc-dialog-max-width: min(560px, 92vw);
                 --dialog-content-padding: 0;
             }
             ha-dialog.size-small {
-                --mdc-dialog-min-width: min(320px, 96vw);
+                --mdc-dialog-min-width: min(360px, 92vw);
+                --mdc-dialog-max-width: min(360px, 92vw);
             }
 
             /* ── Anchored overlay (bottom-left / bottom-right) ── */
@@ -507,10 +509,12 @@ class HikvisionDoorbellDialog extends LitElement {
                 width: 100%;
             }
             .camera-wrap {
-                width: 100%;
+                width: calc(100% - 24px);
+                margin: 12px auto 0;
                 background: #000;
                 aspect-ratio: 16 / 9;
                 overflow: hidden;
+                border-radius: 8px;
             }
             .camera-wrap > * {
                 width: 100%;
@@ -857,7 +861,7 @@ class HikvisionDoorbellButtonEditor extends LitElement {
                             { value: "center", label: "Center" },
                             { value: "bottom-left", label: "Bottom left" },
                             { value: "bottom-right", label: "Bottom right" },
-                        ], mode: "list" } }}
+                        ], mode: "dropdown" } }}
                         .value=${this.config.popup_position ?? "center"}
                         @value-changed=${(e: CustomEvent) => this._selectorChanged("popup_position", e)}
                     ></ha-selector>
@@ -869,7 +873,7 @@ class HikvisionDoorbellButtonEditor extends LitElement {
                         .selector=${{ select: { options: [
                             { value: "large", label: "Large" },
                             { value: "small", label: "Small" },
-                        ], mode: "list" } }}
+                        ], mode: "dropdown" } }}
                         .value=${this.config.popup_size ?? "large"}
                         @value-changed=${(e: CustomEvent) => this._selectorChanged("popup_size", e)}
                     ></ha-selector>
