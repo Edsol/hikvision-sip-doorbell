@@ -226,12 +226,9 @@ auto_answer: false
 sip_video: true
 popup_override_component: hikvision-doorbell-dialog
 popup_config:
-  camera_entity: camera.doorbell        # optional — live video feed in the popup
   gate_entity: button.open_gate         # optional — HA entity to trigger for gate opening
   gate_hold_time: 2                     # seconds to hold the gate button (default: 2)
   close_on_gate: false                  # hang up and close popup after gate opens (default: false)
-  popup_size: large                     # "small" (~320px) or "large" (~560px, default)
-  popup_position: center                # "center" (default), "bottom-left", or "bottom-right"
 users:
   - extension: "6002"
     ha_username: your_ha_username
@@ -240,26 +237,24 @@ users:
 
 > **Note:** `ice_config` and STUN servers are not needed for LAN-only setups. Omit them to keep the config minimal.
 
-**Example — compact overlay in the bottom-right corner:**
-
-```yaml
-popup_config:
-  camera_entity: camera.doorbell
-  gate_entity: button.open_gate
-  popup_size: small
-  popup_position: bottom-right
-  close_on_gate: true
-```
+> **Note:** `camera_entity`, `popup_size`, and `popup_position` are configured directly in the **Lovelace card** (visual editor), not in SIP-Core. This way they are managed from the dashboard without touching the SIP-Core config.
 
 ### popup_config reference
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `camera_entity` | string | — | HA camera entity to show as live feed in the popup |
 | `gate_entity` | string | — | HA entity to trigger for gate opening (`button`, `lock`, or `switch`) |
 | `gate_hold_time` | number | `2` | Seconds the gate button must be held before triggering |
 | `close_on_gate` | boolean | `false` | If `true`, hangs up and closes the popup automatically after the gate opens |
-| `popup_size` | `small` / `large` | `large` | Width of the popup — `small` (~320px), `large` (~560px) |
+
+### Card popup settings
+
+`camera_entity`, `popup_size`, and `popup_position` are set in the card visual editor (or via YAML):
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `camera_entity` | string | — | HA camera entity to show as live feed in the popup |
+| `popup_size` | `small` / `large` | `large` | Width of the popup — `small` (~360px), `large` (~560px) |
 | `popup_position` | `center` / `bottom-left` / `bottom-right` | `center` | `center` uses the standard HA dialog; `bottom-left`/`bottom-right` renders a floating overlay in the corner |
 
 ### Gate opening
