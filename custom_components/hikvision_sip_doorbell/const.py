@@ -2,7 +2,7 @@
 
 DOMAIN = "hikvision_sip_doorbell"
 
-PLATFORMS = ["select", "sensor", "button"]
+PLATFORMS = ["select", "sensor", "binary_sensor", "button"]
 
 # Config entry keys
 CONF_DEVICE_ID = "device_id"                # MQTT device topic identifier (e.g. "videocitofono")
