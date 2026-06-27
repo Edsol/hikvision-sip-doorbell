@@ -17,6 +17,7 @@ from homeassistant.helpers import entity_registry as er
 from .const import (
     CONF_DEVICE_ID,
     DEFAULT_INTERNAL_FALLBACK,
+    DEACTIVATED_BEHAVIOR_OPTIONS,
     DOMAIN,
     DOORBELL_MODES,
     INTERNAL_FALLBACK_OPTIONS,
@@ -38,6 +39,7 @@ async def async_setup_entry(
         DoorbellModeSelect(coordinator, entry),
         InternalFallbackSelect(coordinator, entry),
         NumberToCallSelect(coordinator, entry),
+        DeactivatedBehaviorSelect(coordinator, entry),
     ])
 
 
@@ -101,6 +103,38 @@ class InternalFallbackSelect(CoordinatorEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         await self.coordinator.async_set_internal_fallback(option)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
+
+
+class DeactivatedBehaviorSelect(CoordinatorEntity, SelectEntity):
+    """Select entity for the doorbell behaviour when mode is deactivated."""
+
+    _attr_icon = "mdi:bell-off"
+    _attr_options = DEACTIVATED_BEHAVIOR_OPTIONS
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "deactivated_behavior"
+
+    def __init__(self, coordinator: DoorbellCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        device_id = entry.data[CONF_DEVICE_ID]
+        self._attr_unique_id = f"{DOMAIN}_{device_id}_deactivated_behavior"
+        self._attr_name = "Deactivated Behavior"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_id)},
+            name="Hikvision Doorbell",
+            manufacturer="Hikvision",
+            model=entry.data.get("model", "DS-KV6113-WPE1(C)"),
+        )
+
+    @property
+    def current_option(self) -> str:
+        return self.coordinator.deactivated_behavior
+
+    async def async_select_option(self, option: str) -> None:
+        await self.coordinator.async_set_deactivated_behavior(option)
 
     @callback
     def _handle_coordinator_update(self) -> None:

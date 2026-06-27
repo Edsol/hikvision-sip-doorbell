@@ -33,6 +33,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
+    ASTDB_CHANNEL_RING,
     ASTDB_FAMILY,
     ASTDB_KEY_CHANNEL,
     ASTDB_KEY_ENDPOINT,
@@ -40,6 +41,7 @@ from .const import (
     ASTDB_KEY_MODE,
     AMI_WAIT_ON_FALLBACK_S,
     CONF_CALL_STATE_ENTITY,
+    CONF_DEACTIVATED_BEHAVIOR,
     CONF_DEVICE_ID,
     CONF_DOORBELL_EXTENSION,
     CONF_ENABLED_MODES,
@@ -48,6 +50,8 @@ from .const import (
     CONF_MODE_PHONE_MAP,
     CONF_SIP_DOMAIN,
     CONF_SIP_TRUNK,
+    DEACTIVATED_BEHAVIOR_OPTIONS,
+    DEFAULT_DEACTIVATED_BEHAVIOR,
     DEFAULT_DOORBELL_EXTENSION,
     DEFAULT_INTERNAL_FALLBACK,
     DEFAULT_SIP_DOMAIN,
@@ -84,6 +88,7 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         self._mode_phone_map: dict[str, list[str]] = dict(entry.data.get(CONF_MODE_PHONE_MAP, {}))
         self._selected_phone_entity: str = ""  # entity_id chosen per-mode, persisted in storage
         self._internal_fallback: str = entry.data.get(CONF_INTERNAL_FALLBACK, DEFAULT_INTERNAL_FALLBACK)
+        self._deactivated_behavior: str = entry.data.get(CONF_DEACTIVATED_BEHAVIOR, DEFAULT_DEACTIVATED_BEHAVIOR)
         self._call_state_entity: str = entry.data.get(CONF_CALL_STATE_ENTITY, "")
 
         self._storage: Store = Store(
@@ -116,6 +121,10 @@ class DoorbellCoordinator(DataUpdateCoordinator):
     @property
     def internal_fallback(self) -> str:
         return self._internal_fallback
+
+    @property
+    def deactivated_behavior(self) -> str:
+        return self._deactivated_behavior
 
     @property
     def enabled_modes(self) -> list[str]:
@@ -398,6 +407,16 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         await self._async_write_routing_db()
         self.async_update_listeners()
 
+    async def async_set_deactivated_behavior(self, behavior: str) -> None:
+        """Set the deactivated behavior, persist it, and update AstDB routing."""
+        if behavior not in DEACTIVATED_BEHAVIOR_OPTIONS:
+            _LOGGER.warning("Unknown deactivated behavior: %s", behavior)
+            return
+        self._deactivated_behavior = behavior
+        await self._async_save_state()
+        await self._async_write_routing_db()
+        self.async_update_listeners()
+
     # ── AstDB routing ─────────────────────────────────────────────────────────
 
     def _is_internal_ext_registered(self) -> bool:
@@ -426,6 +445,8 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         route = DIAL_ROUTE.get(self.mode, "internal")
 
         if route == "none":
+            if self._deactivated_behavior == "ring":
+                return ASTDB_CHANNEL_RING, ""
             return "", ""
 
         if route == "internal":
@@ -528,12 +549,14 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         if data:
             self.mode = data.get("mode", DOORBELL_MODES[0])
             self._internal_fallback = data.get("internal_fallback", self._internal_fallback)
+            self._deactivated_behavior = data.get("deactivated_behavior", self._deactivated_behavior)
             self._selected_phone_entity = data.get("selected_phone_entity", "")
 
     async def _async_save_state(self) -> None:
         await self._storage.async_save({
             "mode": self.mode,
             "internal_fallback": self._internal_fallback,
+            "deactivated_behavior": self._deactivated_behavior,
             "selected_phone_entity": self._selected_phone_entity,
         })
 
@@ -551,6 +574,7 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         self._sip_trunk = entry.data.get(CONF_SIP_TRUNK, self._sip_trunk)
         self._sip_domain = entry.data.get(CONF_SIP_DOMAIN, self._sip_domain)
         self._internal_fallback = entry.data.get(CONF_INTERNAL_FALLBACK, self._internal_fallback)
+        self._deactivated_behavior = entry.data.get(CONF_DEACTIVATED_BEHAVIOR, self._deactivated_behavior)
         self._enabled_modes = list(entry.data.get(CONF_ENABLED_MODES, DOORBELL_MODES))
         self._mode_phone_map = dict(entry.data.get(CONF_MODE_PHONE_MAP, {}))
         # if current mode was disabled, fall back to first enabled mode

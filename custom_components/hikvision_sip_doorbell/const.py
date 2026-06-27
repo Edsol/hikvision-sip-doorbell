@@ -24,6 +24,14 @@ INTERNAL_FALLBACK_OPTIONS = ["wait", "call_external", "none"]
 DEFAULT_INTERNAL_FALLBACK = "wait"
 AMI_WAIT_ON_FALLBACK_S = 25   # seconds to keep channel open when fallback=wait
 
+# Behaviour when mode is deactivated
+# "hangup" — answer and hang up immediately (default)
+# "ring"   — do not answer; doorbell keeps ringing until its own timeout
+CONF_DEACTIVATED_BEHAVIOR = "deactivated_behavior"
+DEACTIVATED_BEHAVIOR_OPTIONS = ["hangup", "ring"]
+DEFAULT_DEACTIVATED_BEHAVIOR = "hangup"
+ASTDB_CHANNEL_RING = "__ring__"   # sentinel: Asterisk dialplan keeps ringing without answering
+
 # Doorbell operating modes
 DOORBELL_MODES = [
     "at_home",

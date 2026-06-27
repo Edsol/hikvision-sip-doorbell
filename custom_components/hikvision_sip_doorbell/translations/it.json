@@ -15,6 +15,12 @@
           "call_external": "Chiama numero esterno",
           "none": "Non fare nulla"
         }
+      },
+      "deactivated_behavior": {
+        "state": {
+          "hangup": "Riaggancia subito",
+          "ring": "Continua a squillare (nessuna risposta)"
+        }
       }
     }
   },

@@ -15,6 +15,12 @@
           "call_external": "Call external number",
           "none": "Do nothing"
         }
+      },
+      "deactivated_behavior": {
+        "state": {
+          "hangup": "Hang up immediately",
+          "ring": "Keep ringing (no answer)"
+        }
       }
     }
   },
