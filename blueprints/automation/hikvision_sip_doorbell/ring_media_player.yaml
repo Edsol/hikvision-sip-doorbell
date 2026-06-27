@@ -109,6 +109,7 @@ blueprint:
         condition:
 
 variables:
+  call_state_sensor: !input call_state_sensor
   use_tts: !input use_tts
   tts_engine: !input tts_engine
   tts_message: !input tts_message
@@ -176,7 +177,7 @@ action:
                         media_content_type: music
                         media_content_id: "{{ sound_url }}"
                 - wait_template: >
-                    {{ not is_state(trigger.entity_id, 'ringing') }}
+                    {{ not is_state(call_state_sensor, 'ringing') }}
                   timeout:
                     seconds: "{{ repeat_interval }}"
                   continue_on_timeout: true
