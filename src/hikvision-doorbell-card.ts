@@ -3,7 +3,7 @@ import { property, state } from "lit/decorators.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type PopupSize = "small" | "large";
+type PopupSize = "small" | "medium" | "large";
 type PopupPosition = "center" | "bottom-left" | "bottom-right";
 
 interface PopupConfig {
@@ -329,7 +329,7 @@ class HikvisionDoorbellDialog extends LitElement {
         `;
 
         if (isEnded) {
-            return html`<div class="bottom-bar ended">Chiamata terminata</div>`;
+            return html`<div class="bottom-bar ended"><ha-icon icon="mdi:phone-hangup"></ha-icon> Chiamata terminata</div>`;
         }
 
         if (isRinging) {
@@ -381,20 +381,111 @@ class HikvisionDoorbellDialog extends LitElement {
     }
 
     private get _popupSize(): PopupSize {
-        return this.popupSize ?? "large";
+        return this.popupSize ?? "medium";
     }
 
     private get _popupPosition(): PopupPosition {
         return this.popupPosition ?? "center";
     }
 
+    private get _effectivePopupSize(): PopupSize {
+        return this._popupPosition === "center" ? this._popupSize : this._popupSize === "large" ? "medium" : this._popupSize;
+    }
+
+    updated(): void {
+        this._injectDialogSizeStyle();
+    }
+
+    private _popupWidth(): string {
+        switch (this._effectivePopupSize) {
+            case "small":
+                return "min(92vw, clamp(360px, 42vw, 560px))";
+            case "large":
+                return "min(96vw, clamp(720px, 82vw, 1400px))";
+            case "medium":
+            default:
+                return "min(92vw, clamp(560px, 70vw, 1100px))";
+        }
+    }
+
+    private _injectDialogSizeStyle(attempt = 0): void {
+        const haDialog = this.shadowRoot?.querySelector("ha-dialog");
+        if (!haDialog) return;
+
+        const width = this._popupWidth();
+        haDialog.style.setProperty("--mdc-dialog-min-width", width);
+        haDialog.style.setProperty("--mdc-dialog-max-width", width);
+        haDialog.style.setProperty("--dialog-surface-width", width);
+        haDialog.style.setProperty("--dialog-content-padding", "0");
+        haDialog.style.setProperty("width", width);
+        haDialog.style.setProperty("max-width", width);
+
+        if (!haDialog.shadowRoot) {
+            if (attempt < 10) window.setTimeout(() => this._injectDialogSizeStyle(attempt + 1), 50);
+            return;
+        }
+
+        const styleId = "hikvision-size-override";
+        let haStyle = haDialog.shadowRoot.getElementById(styleId) as HTMLStyleElement | null;
+        if (!haStyle) {
+            haStyle = document.createElement("style");
+            haStyle.id = styleId;
+            haDialog.shadowRoot.appendChild(haStyle);
+        }
+        haStyle.textContent = `
+            :host {
+                --mdc-dialog-min-width: ${width} !important;
+                --mdc-dialog-max-width: ${width} !important;
+                --dialog-surface-width: ${width} !important;
+                --width: ${width} !important;
+                width: ${width} !important;
+                max-width: ${width} !important;
+            }
+            .mdc-dialog__surface {
+                width: ${width} !important;
+                max-width: ${width} !important;
+            }
+        `;
+
+        const waDialog = haDialog.shadowRoot.querySelector("wa-dialog") as HTMLElement | null;
+        if (!waDialog?.shadowRoot) {
+            if (attempt < 10) window.setTimeout(() => this._injectDialogSizeStyle(attempt + 1), 50);
+            return;
+        }
+
+        waDialog.style.setProperty("--width", width);
+        waDialog.style.setProperty("width", width);
+        waDialog.style.setProperty("max-width", width);
+
+        let waStyle = waDialog.shadowRoot.getElementById(styleId) as HTMLStyleElement | null;
+        if (!waStyle) {
+            waStyle = document.createElement("style");
+            waStyle.id = styleId;
+            waDialog.shadowRoot.appendChild(waStyle);
+        }
+        waStyle.textContent = `
+            :host {
+                --width: ${width} !important;
+                width: ${width} !important;
+                max-width: ${width} !important;
+            }
+            [part~="dialog"],
+            .dialog,
+            .dialog__panel {
+                width: ${width} !important;
+                max-width: ${width} !important;
+            }
+        `;
+    }
+
     render(): TemplateResult {
         const position = this._popupPosition;
         const isAnchored = position !== "center";
+        const size = this._effectivePopupSize;
 
         if (isAnchored) {
             return html`
-                <div class="anchored-overlay ${position} size-${this._popupSize} ${this._open ? "open" : ""}">
+                <div class="anchored-overlay ${position} size-${size} ${this._open ? "open" : ""}">
                     <div class="anchored-dialog">
                         <div class="anchored-header">
                             <span class="title ${this._callState}">
@@ -418,24 +509,10 @@ class HikvisionDoorbellDialog extends LitElement {
             `;
         }
 
-        const dialogWidth = this._popupSize === "small" ? "min(360px, 92vw)" : "min(560px, 92vw)";
         return html`
             <ha-dialog ?open=${this._open} @closed=${this._close} hideActions flexContent
-                class="size-${this._popupSize}"
-                style="--ha-dialog-width-full:${dialogWidth};--ha-dialog-width-md:${dialogWidth};--ha-dialog-width-sm:${dialogWidth};--ha-max-width:${dialogWidth};">
-                <ha-dialog-header slot="heading">
-                    <ha-icon-button slot="navigationIcon" @click=${this._close}>
-                        <ha-icon icon="mdi:close"></ha-icon>
-                    </ha-icon-button>
-                    <span slot="title" class="title ${this._callState}">
-                        ${this._callState === "ringing" ? html`<ha-icon class="ring-icon" icon="mdi:phone-ring"></ha-icon> Chiamata in arrivo` :
-                          this._callState === "active"  ? html`<ha-icon icon="mdi:phone-in-talk"></ha-icon> In chiamata` :
-                          this._callState === "ended"   ? html`<ha-icon icon="mdi:phone-hangup"></ha-icon> Chiamata terminata` :
-                          html`<ha-icon icon="mdi:doorbell-video"></ha-icon> Videocitofono`}
-                    </span>
-                </ha-dialog-header>
-
-                <div class="content">
+                class="size-${size}">
+                <div class="content center-content">
                     <div class="camera-wrap">
                         ${this._cameraCard ?? html`<div class="camera-placeholder"><ha-icon icon="mdi:camera-off"></ha-icon></div>`}
                     </div>
@@ -449,15 +526,24 @@ class HikvisionDoorbellDialog extends LitElement {
         return css`
             /* ── Center dialog (default) ── */
             ha-dialog {
-                --mdc-dialog-min-width: min(560px, 92vw);
-                --mdc-dialog-max-width: min(560px, 92vw);
-                --dialog-surface-width: min(560px, 92vw);
+                --mdc-dialog-min-width: min(92vw, clamp(560px, 70vw, 1100px));
+                --mdc-dialog-max-width: min(92vw, clamp(560px, 70vw, 1100px));
+                --dialog-surface-width: min(92vw, clamp(560px, 70vw, 1100px));
+                --width: min(92vw, clamp(560px, 70vw, 1100px));
                 --dialog-content-padding: 0;
+                --mdc-dialog-heading-ink-color: var(--primary-text-color);
             }
             ha-dialog.size-small {
-                --mdc-dialog-min-width: min(360px, 92vw);
-                --mdc-dialog-max-width: min(360px, 92vw);
-                --dialog-surface-width: min(360px, 92vw);
+                --mdc-dialog-min-width: min(92vw, clamp(360px, 42vw, 560px));
+                --mdc-dialog-max-width: min(92vw, clamp(360px, 42vw, 560px));
+                --dialog-surface-width: min(92vw, clamp(360px, 42vw, 560px));
+                --width: min(92vw, clamp(360px, 42vw, 560px));
+            }
+            ha-dialog.size-large {
+                --mdc-dialog-min-width: min(96vw, clamp(720px, 82vw, 1400px));
+                --mdc-dialog-max-width: min(96vw, clamp(720px, 82vw, 1400px));
+                --dialog-surface-width: min(96vw, clamp(720px, 82vw, 1400px));
+                --width: min(96vw, clamp(720px, 82vw, 1400px));
             }
 
             /* ── Anchored overlay (bottom-left / bottom-right) ── */
@@ -481,7 +567,7 @@ class HikvisionDoorbellDialog extends LitElement {
                 overflow: hidden;
                 width: 320px;
             }
-            .anchored-overlay.size-large .anchored-dialog { width: 420px; }
+            .anchored-overlay.size-medium .anchored-dialog { width: min(calc(100vw - 48px), clamp(420px, 35vw, 640px)); }
             .anchored-header {
                 display: flex;
                 align-items: center;
@@ -515,14 +601,23 @@ class HikvisionDoorbellDialog extends LitElement {
                 display: flex;
                 flex-direction: column;
                 width: 100%;
+                max-width: 100%;
+                box-sizing: border-box;
+                background: var(--card-background-color, #fff);
+                overflow: hidden;
+            }
+            .center-content {
+                padding: 0;
             }
             .camera-wrap {
-                width: calc(100% - 24px);
-                margin: 12px auto 0;
+                width: 100%;
+                max-width: 100%;
+                box-sizing: border-box;
+                margin: 0;
                 background: #000;
                 aspect-ratio: 16 / 9;
                 overflow: hidden;
-                border-radius: 8px;
+                border-radius: 0;
             }
             .camera-wrap > * {
                 width: 100%;
@@ -539,54 +634,70 @@ class HikvisionDoorbellDialog extends LitElement {
             }
             .bottom-bar {
                 display: flex;
-                justify-content: space-around;
+                justify-content: center;
                 align-items: center;
-                padding: 16px;
-                border-top: 1px solid var(--divider-color);
-                min-height: 80px;
+                gap: clamp(24px, 7vw, 84px);
+                padding: 12px 16px 14px;
+                min-height: 68px;
+                box-sizing: border-box;
+                overflow: hidden;
             }
             .bottom-bar.ended {
                 justify-content: center;
+                gap: 8px;
                 color: var(--secondary-text-color);
                 font-size: 14px;
+                min-height: 56px;
+            }
+            .bottom-bar.ended ha-icon {
+                --mdc-icon-size: 18px;
             }
             .btn {
-                --mdc-icon-button-size: 64px;
-                --mdc-icon-size: 32px;
+                --mdc-icon-button-size: 48px;
+                --mdc-icon-size: 22px;
                 border-radius: 50%;
+                color: var(--primary-text-color);
             }
             .accept-btn {
                 color: white;
                 background: var(--success-color, #4caf50);
+                --mdc-icon-button-size: 58px;
+                --mdc-icon-size: 28px;
+                box-shadow: 0 5px 14px rgba(76, 175, 80, 0.35);
             }
             .deny-btn {
                 color: white;
                 background: var(--error-color, #f44336);
+                --mdc-icon-button-size: 58px;
+                --mdc-icon-size: 28px;
+                box-shadow: 0 5px 14px rgba(244, 67, 54, 0.32);
             }
             .gate-wrap {
                 position: relative;
-                width: 64px;
-                height: 64px;
+                width: 56px;
+                height: 56px;
             }
             .gate-progress {
                 position: absolute;
-                top: 0; left: 0;
-                width: 64px;
-                height: 64px;
+                inset: 0;
+                width: 56px;
+                height: 56px;
                 pointer-events: none;
             }
             .gate-btn {
                 position: absolute;
                 top: 50%; left: 50%;
                 transform: translate(-50%, -50%);
-                --mdc-icon-button-size: 56px;
-                --mdc-icon-size: 28px;
+                --mdc-icon-button-size: 48px;
+                --mdc-icon-size: 24px;
                 color: var(--warning-color, #f4b400);
+                background: var(--secondary-background-color);
             }
             .ctrl-btn {
                 --mdc-icon-button-size: 48px;
-                --mdc-icon-size: 24px;
+                --mdc-icon-size: 22px;
                 color: var(--primary-text-color);
+                background: var(--secondary-background-color);
             }
             .ctrl-btn.muted {
                 color: var(--secondary-text-color);
@@ -823,7 +934,15 @@ class HikvisionDoorbellButtonEditor extends LitElement {
     }
 
     private _selectorChanged(key: keyof CardConfig, e: CustomEvent): void {
-        this._emit({ ...this.config, [key]: e.detail.value });
+        const nextConfig = { ...this.config, [key]: e.detail.value };
+        if (
+            key === "popup_position" &&
+            e.detail.value !== "center" &&
+            nextConfig.popup_size === "large"
+        ) {
+            nextConfig.popup_size = "medium";
+        }
+        this._emit(nextConfig);
     }
 
     private _extraEntityChanged(index: number, field: keyof ExtraEntity, e: CustomEvent): void {
@@ -844,6 +963,21 @@ class HikvisionDoorbellButtonEditor extends LitElement {
 
     render(): TemplateResult {
         const extras = this.config.extra_entities ?? [];
+        const popupPosition = this.config.popup_position ?? "center";
+        const popupSizeOptions = popupPosition === "center"
+            ? [
+                { value: "small", label: "Small" },
+                { value: "medium", label: "Medium" },
+                { value: "large", label: "Large" },
+            ]
+            : [
+                { value: "small", label: "Small" },
+                { value: "medium", label: "Medium" },
+            ];
+        const popupSizeValue = popupPosition === "center"
+            ? this.config.popup_size ?? "medium"
+            : this.config.popup_size === "large" ? "medium" : this.config.popup_size ?? "medium";
+
         return html`
             <div class="form">
                 <div class="row">
@@ -882,7 +1016,7 @@ class HikvisionDoorbellButtonEditor extends LitElement {
                             { value: "bottom-left", label: "Bottom left" },
                             { value: "bottom-right", label: "Bottom right" },
                         ], mode: "dropdown" } }}
-                        .value=${this.config.popup_position ?? "center"}
+                        .value=${popupPosition}
                         @value-changed=${(e: CustomEvent) => this._selectorChanged("popup_position", e)}
                     ></ha-selector>
                 </div>
@@ -890,11 +1024,8 @@ class HikvisionDoorbellButtonEditor extends LitElement {
                     <div class="section-label">Popup size</div>
                     <ha-selector
                         .hass=${this.hass}
-                        .selector=${{ select: { options: [
-                            { value: "large", label: "Large" },
-                            { value: "small", label: "Small" },
-                        ], mode: "dropdown" } }}
-                        .value=${this.config.popup_size ?? "large"}
+                        .selector=${{ select: { options: popupSizeOptions, mode: "dropdown" } }}
+                        .value=${popupSizeValue}
                         @value-changed=${(e: CustomEvent) => this._selectorChanged("popup_size", e)}
                     ></ha-selector>
                 </div>
@@ -971,4 +1102,3 @@ console.info(
     "color: white; background: #025a9e; font-weight: bold; padding: 2px 4px; border-radius: 3px 0 0 3px;",
     "color: #025a9e; background: #e8f4fd; font-weight: bold; padding: 2px 4px; border-radius: 0 3px 3px 0;"
 );
-

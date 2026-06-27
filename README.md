@@ -254,7 +254,7 @@ users:
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `camera_entity` | string | — | HA camera entity to show as live feed in the popup |
-| `popup_size` | `small` / `large` | `large` | Width of the popup — `small` (~360px), `large` (~560px) |
+| `popup_size` | `small` / `medium` / `large` | `medium` | Width of the popup — center supports all sizes; corner popups support `small` and `medium` |
 | `popup_position` | `center` / `bottom-left` / `bottom-right` | `center` | `center` uses the standard HA dialog; `bottom-left`/`bottom-right` renders a floating overlay in the corner |
 
 ### Gate opening
