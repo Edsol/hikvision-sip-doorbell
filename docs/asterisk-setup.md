@@ -209,6 +209,7 @@ exten => _X.,1,NoOp(Doorbell ring on ${EXTEN})
  same => n,Set(DEST=${DB(routing/channel)})
  same => n,Set(ENDPT=${DB(routing/endpoint)})
  same => n,GotoIf($["${DEST}" = ""]?noanswer)
+ same => n,GotoIf($["${DEST}" = "__ring__"]?ring)
  same => n,Set(ATTEMPTS=0)
  same => n(retry),GotoIf($[${ATTEMPTS} >= 9]?noanswer)
  same => n,Set(ATTEMPTS=$[${ATTEMPTS} + 1])
@@ -219,6 +220,8 @@ exten => _X.,1,NoOp(Doorbell ring on ${EXTEN})
  same => n(dial),NoOp(Dialling ${DEST})
  same => n,Dial(${DEST},30)
  same => n,Hangup()
+ same => n(ring),Wait(60)
+ same => n,Goto(noanswer)
 
 exten => noanswer,1,StopPlaytones()
 exten => noanswer,n,Hangup()
@@ -233,7 +236,8 @@ exten => _X.,1,NoOp(OUT via Iliad: ${EXTEN})
 > - `Answer()` + `Playtones(ring)` keeps the doorbell ringing immediately, before any destination answers.
 > - For internal calls (`routing/endpoint` = e.g. `6002`): polls endpoint state with `DEVICE_STATE` every 5s, up to 9 attempts (~45s). Dials only when the endpoint is available — prevents premature `Cancelled` being sent to SIP clients like SIP-Core.
 > - For external calls (`routing/endpoint` = `""`): skips the poll and dials immediately via trunk.
-> - `deactivated` mode: `routing/channel` is empty → hangs up immediately.
+> - `deactivated` mode + **"Hang up immediately"**: `routing/channel` is empty → hangs up immediately.
+> - `deactivated` mode + **"Keep ringing (no answer)"**: `routing/channel` is `__ring__` → jumps to the `ring` label, keeps the ringtone playing for 60s then hangs up. The call is never answered — caller hears ringing but no one picks up.
 > - GotoIf labels use `?label` syntax (no `,1`) — required for labels within the same extension.
 >
 > `routing/channel` and `routing/endpoint` are written by HA via AMI `DBPut` whenever mode,
@@ -315,3 +319,4 @@ Under **Video/Audio → Audio**:
 | GotoIf label jump fails (`invalid extension`) | `?label,1` syntax tells Asterisk to find an extension named `label`, not a dialplan label | Use `?label` (no `,1`) for jumps within the same extension |
 | Doorbell called wrong extension directly | Number Settings on Hikvision panel pointed to `6002` instead of `6001` | Set SIP Number to `6001` (the endpoint with `context=from-door`) |
 | No ringback during external call (Iliad 13s delay) | `StopPlaytones()` placed before `Dial()` in `(dial)` label — tone stopped before trunk answered | Remove `StopPlaytones()` from `(dial)`; keep only on `noanswer`. `Dial()` stops tones automatically on answer |
+| Deactivated mode hangs up immediately even with "Keep ringing" | `routing/channel` was `""` for all deactivated cases | Set `routing/channel = __ring__` when deactivated + behavior=ring; add `GotoIf($["${DEST}" = "__ring__"]?ring)` in dialplan before the retry loop, with a `ring` label that calls `Wait(60)` then goes to `noanswer` |

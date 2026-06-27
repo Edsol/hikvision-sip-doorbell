@@ -97,19 +97,31 @@ blueprint:
       selector:
         text:
 
+    doorbell_mode_sensor:
+      name: Doorbell Mode (optional)
+      description: >
+        The "Doorbell Mode" select entity of the same device. If set, the automation will not ring
+        when the mode is "Deactivated". Leave empty to ring regardless of mode.
+      default: ""
+      selector:
+        entity:
+          integration: hikvision_sip_doorbell
+          domain: select
+
     conditions:
       name: Conditions (optional)
       description: >
         Additional conditions that must be true before ringing.
-        Use this to restrict ringing by doorbell mode, time of day, presence, or any entity state.
-        Example: only ring when the doorbell mode is "away_from_home", or only between 08:00 and 22:00.
-        Leave empty to always ring.
+        Use this to restrict ringing by time of day, presence, or any entity state.
+        The "Deactivated" mode check is handled automatically above.
+        Leave empty to always ring (when not deactivated).
       default: []
       selector:
         condition:
 
 variables:
   call_state_sensor: !input call_state_sensor
+  doorbell_mode_sensor: !input doorbell_mode_sensor
   use_tts: !input use_tts
   tts_engine: !input tts_engine
   tts_message: !input tts_message
@@ -145,6 +157,9 @@ action:
           - condition: trigger
             id: ringing
         sequence:
+          - condition: template
+            value_template: >
+              {{ doorbell_mode_sensor == '' or not is_state(doorbell_mode_sensor, 'deactivated') }}
           - condition: !input conditions
           - service: media_player.volume_set
             target:

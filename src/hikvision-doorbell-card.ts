@@ -38,11 +38,17 @@ interface HomeAssistant {
     callService(domain: string, service: string, data: Record<string, unknown>): void;
 }
 
+interface ExtraEntity {
+    entity: string;
+    icon?: string;
+}
+
 interface CardConfig {
     camera_entity?: string;
     hide_button?: boolean;
     button_label?: string;
     call_state_entity?: string;
+    extra_entities?: ExtraEntity[];
 }
 
 declare const __CARD_VERSION__: string;
@@ -590,14 +596,19 @@ class HikvisionDoorbellButton extends LitElement {
             :host { display: block; }
             ha-card {
                 display: flex;
-                align-items: center;
-                justify-content: center;
+                flex-direction: column;
                 padding: 16px;
                 cursor: pointer;
                 gap: 12px;
             }
+            .main-row {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 12px;
+            }
             ha-icon { --mdc-icon-size: 28px; color: var(--primary-color); }
-            span { font-size: 16px; font-weight: 500; }
+            span.label { font-size: 16px; font-weight: 500; }
             ha-icon.ringing {
                 animation: ring 0.6s ease-in-out infinite alternate;
                 color: var(--error-color, #db4437);
@@ -605,6 +616,27 @@ class HikvisionDoorbellButton extends LitElement {
             @keyframes ring {
                 from { transform: rotate(-20deg) scale(1.1); }
                 to   { transform: rotate(20deg)  scale(1.2); }
+            }
+            .chips {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                justify-content: center;
+            }
+            .chip {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                padding: 4px 10px;
+                border-radius: 16px;
+                background: var(--secondary-background-color);
+                font-size: 13px;
+                color: var(--primary-text-color);
+                cursor: default;
+            }
+            .chip ha-icon {
+                --mdc-icon-size: 16px;
+                color: var(--secondary-text-color);
             }
         `;
     }
@@ -638,6 +670,29 @@ class HikvisionDoorbellButton extends LitElement {
         return this._hass.states[this._config.call_state_entity]?.state === "ringing";
     }
 
+    private _renderChips(): TemplateResult {
+        const entities = this._config?.extra_entities ?? [];
+        if (!entities.length || !this._hass) return html``;
+        return html`
+            <div class="chips" @click=${(e: Event) => e.stopPropagation()}>
+                ${entities.map(({ entity, icon }) => {
+                    const state = this._hass!.states[entity];
+                    if (!state) return html``;
+                    const displayIcon = icon || state.attributes.icon || "mdi:dots-horizontal";
+                    const displayState = state.attributes.friendly_name
+                        ? `${state.attributes.friendly_name}: ${state.state}`
+                        : `${entity.split(".")[1]}: ${state.state}`;
+                    return html`
+                        <div class="chip">
+                            <ha-icon icon=${displayIcon}></ha-icon>
+                            <span>${displayState}</span>
+                        </div>
+                    `;
+                })}
+            </div>
+        `;
+    }
+
     render(): TemplateResult {
         if (this._config?.hide_button) {
             return html``;
@@ -646,11 +701,14 @@ class HikvisionDoorbellButton extends LitElement {
         const ringing = this._isRinging;
         return html`
             <ha-card @click=${this._open}>
-                <ha-icon
-                    class=${ringing ? "ringing" : ""}
-                    icon=${ringing ? "mdi:doorbell" : "mdi:doorbell-video"}
-                ></ha-icon>
-                <span>${label}</span>
+                <div class="main-row">
+                    <ha-icon
+                        class=${ringing ? "ringing" : ""}
+                        icon=${ringing ? "mdi:doorbell" : "mdi:doorbell-video"}
+                    ></ha-icon>
+                    <span class="label">${label}</span>
+                </div>
+                ${this._renderChips()}
             </ha-card>
         `;
     }
@@ -683,7 +741,27 @@ class HikvisionDoorbellButtonEditor extends LitElement {
         return css`
             .form { padding: 16px; display: flex; flex-direction: column; gap: 24px; }
             .row { display: flex; flex-direction: column; gap: 4px; }
-            .label { font-size: 12px; font-weight: 500; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.4px; }
+            .section-label {
+                font-size: 12px; font-weight: 500; color: var(--secondary-text-color);
+                text-transform: uppercase; letter-spacing: 0.4px;
+            }
+            .section-title {
+                font-size: 14px; font-weight: 500; color: var(--primary-text-color);
+                padding-top: 8px; border-top: 1px solid var(--divider-color);
+            }
+            .extra-entity-row {
+                display: flex; align-items: center; gap: 8px;
+            }
+            .extra-entity-row ha-selector { flex: 1; }
+            .extra-entity-row ha-selector.icon-selector { flex: 0 0 120px; }
+            ha-icon-button { --mdc-icon-button-size: 36px; --mdc-icon-size: 20px; }
+            .add-btn {
+                display: flex; align-items: center; gap: 4px;
+                color: var(--primary-color); cursor: pointer;
+                font-size: 14px; padding: 4px 0;
+                background: none; border: none;
+            }
+            .add-btn ha-icon { --mdc-icon-size: 20px; color: var(--primary-color); }
         `;
     }
 
@@ -691,19 +769,40 @@ class HikvisionDoorbellButtonEditor extends LitElement {
         this.config = config;
     }
 
-    private _selectorChanged(key: keyof CardConfig, e: CustomEvent): void {
+    private _emit(newConfig: CardConfig): void {
         this.dispatchEvent(new CustomEvent("config-changed", {
-            detail: { config: { ...this.config, [key]: e.detail.value } },
+            detail: { config: newConfig },
             bubbles: true,
             composed: true,
         }));
     }
 
+    private _selectorChanged(key: keyof CardConfig, e: CustomEvent): void {
+        this._emit({ ...this.config, [key]: e.detail.value });
+    }
+
+    private _extraEntityChanged(index: number, field: keyof ExtraEntity, e: CustomEvent): void {
+        const entities = [...(this.config.extra_entities ?? [])];
+        entities[index] = { ...entities[index], [field]: e.detail.value };
+        this._emit({ ...this.config, extra_entities: entities });
+    }
+
+    private _addExtraEntity(): void {
+        const entities = [...(this.config.extra_entities ?? []), { entity: "", icon: "" }];
+        this._emit({ ...this.config, extra_entities: entities });
+    }
+
+    private _removeExtraEntity(index: number): void {
+        const entities = (this.config.extra_entities ?? []).filter((_, i) => i !== index);
+        this._emit({ ...this.config, extra_entities: entities });
+    }
+
     render(): TemplateResult {
+        const extras = this.config.extra_entities ?? [];
         return html`
             <div class="form">
                 <div class="row">
-                    <div class="label">Button label</div>
+                    <div class="section-label">Button label</div>
                     <ha-selector
                         .hass=${this.hass}
                         .selector=${{ text: {} }}
@@ -712,7 +811,7 @@ class HikvisionDoorbellButtonEditor extends LitElement {
                     ></ha-selector>
                 </div>
                 <div class="row">
-                    <div class="label">Call state entity (ringing animation)</div>
+                    <div class="section-label">Call state entity (ringing animation)</div>
                     <ha-selector
                         .hass=${this.hass}
                         .selector=${{ entity: { domain: "sensor" } }}
@@ -721,7 +820,7 @@ class HikvisionDoorbellButtonEditor extends LitElement {
                     ></ha-selector>
                 </div>
                 <div class="row">
-                    <div class="label">Camera entity (optional)</div>
+                    <div class="section-label">Camera entity (optional)</div>
                     <ha-selector
                         .hass=${this.hass}
                         .selector=${{ entity: { domain: "camera" } }}
@@ -737,6 +836,33 @@ class HikvisionDoorbellButtonEditor extends LitElement {
                         .label=${"Hide button (popup only on incoming call)"}
                         @value-changed=${(e: CustomEvent) => this._selectorChanged("hide_button", e)}
                     ></ha-selector>
+                </div>
+
+                <div class="row">
+                    <div class="section-title">Extra entities (shown as chips)</div>
+                    ${extras.map((item, i) => html`
+                        <div class="extra-entity-row">
+                            <ha-selector
+                                .hass=${this.hass}
+                                .selector=${{ entity: {} }}
+                                .value=${item.entity}
+                                @value-changed=${(e: CustomEvent) => this._extraEntityChanged(i, "entity", e)}
+                            ></ha-selector>
+                            <ha-selector
+                                class="icon-selector"
+                                .hass=${this.hass}
+                                .selector=${{ icon: {} }}
+                                .value=${item.icon ?? ""}
+                                @value-changed=${(e: CustomEvent) => this._extraEntityChanged(i, "icon", e)}
+                            ></ha-selector>
+                            <ha-icon-button @click=${() => this._removeExtraEntity(i)}>
+                                <ha-icon icon="mdi:delete"></ha-icon>
+                            </ha-icon-button>
+                        </div>
+                    `)}
+                    <button class="add-btn" @click=${this._addExtraEntity}>
+                        <ha-icon icon="mdi:plus"></ha-icon> Add entity
+                    </button>
                 </div>
             </div>
         `;
