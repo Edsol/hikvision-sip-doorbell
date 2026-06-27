@@ -49,6 +49,8 @@ interface CardConfig {
     button_label?: string;
     call_state_entity?: string;
     extra_entities?: ExtraEntity[];
+    popup_size?: PopupSize;
+    popup_position?: PopupPosition;
 }
 
 declare const __CARD_VERSION__: string;
@@ -654,10 +656,21 @@ class HikvisionDoorbellButton extends LitElement {
         if (!document.querySelector("hikvision-doorbell-dialog")) {
             document.body.appendChild(document.createElement("hikvision-doorbell-dialog"));
         }
+        this._applyPopupConfig();
     }
 
     setConfig(config: CardConfig): void {
         this._config = config;
+        this._applyPopupConfig();
+    }
+
+    private _applyPopupConfig(): void {
+        if (!window.sipCore) return;
+        if (!window.sipCore.config) window.sipCore.config = {};
+        if (!window.sipCore.config.popup_config) window.sipCore.config.popup_config = {};
+        if (this._config.popup_size) window.sipCore.config.popup_config.popup_size = this._config.popup_size;
+        if (this._config.popup_position) window.sipCore.config.popup_config.popup_position = this._config.popup_position;
+        if (this._config.camera_entity) window.sipCore.config.popup_config.camera_entity = this._config.camera_entity;
     }
 
     set hass(hass: HomeAssistant) {
@@ -826,6 +839,31 @@ class HikvisionDoorbellButtonEditor extends LitElement {
                         .selector=${{ entity: { domain: "camera" } }}
                         .value=${this.config.camera_entity ?? ""}
                         @value-changed=${(e: CustomEvent) => this._selectorChanged("camera_entity", e)}
+                    ></ha-selector>
+                </div>
+                <div class="row">
+                    <div class="section-label">Popup position</div>
+                    <ha-selector
+                        .hass=${this.hass}
+                        .selector=${{ select: { options: [
+                            { value: "center", label: "Center" },
+                            { value: "bottom-left", label: "Bottom left" },
+                            { value: "bottom-right", label: "Bottom right" },
+                        ], mode: "list" } }}
+                        .value=${this.config.popup_position ?? "center"}
+                        @value-changed=${(e: CustomEvent) => this._selectorChanged("popup_position", e)}
+                    ></ha-selector>
+                </div>
+                <div class="row">
+                    <div class="section-label">Popup size</div>
+                    <ha-selector
+                        .hass=${this.hass}
+                        .selector=${{ select: { options: [
+                            { value: "large", label: "Large" },
+                            { value: "small", label: "Small" },
+                        ], mode: "list" } }}
+                        .value=${this.config.popup_size ?? "large"}
+                        @value-changed=${(e: CustomEvent) => this._selectorChanged("popup_size", e)}
                     ></ha-selector>
                 </div>
                 <div class="row">
