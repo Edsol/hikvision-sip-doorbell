@@ -712,6 +712,20 @@ class HikvisionDoorbellButtonEditor extends LitElement {
 
 customElements.define("hikvision-doorbell-button-editor", HikvisionDoorbellButtonEditor);
 
+// ── Ensure dialog exists in DOM as early as possible for SIP-Core auto-popup ──
+// Using both strategies: immediately on script load, and again on window.load
+// (HA loads cards asynchronously — window.load may fire before cards mount)
+function _ensureDialog(): void {
+    if (!document.querySelector("hikvision-doorbell-dialog")) {
+        document.body.appendChild(document.createElement("hikvision-doorbell-dialog"));
+    }
+}
+if (document.body) {
+    _ensureDialog();
+} else {
+    window.addEventListener("load", _ensureDialog, { once: true });
+}
+
 console.info(
     `%c HIKVISION-DOORBELL-CARD %c v${__CARD_VERSION__} `,
     "color: white; background: #025a9e; font-weight: bold; padding: 2px 4px; border-radius: 3px 0 0 3px;",
