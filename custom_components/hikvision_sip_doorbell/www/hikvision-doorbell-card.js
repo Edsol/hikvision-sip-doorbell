@@ -391,7 +391,7 @@ var Ct=Object.defineProperty;var xt=Object.getOwnPropertyDescriptor;var _=(n,t,e
                     </button>
                 </div>
             </div>
-        `}};_([m({attribute:!1})],N.prototype,"config",2),_([m({attribute:!1})],N.prototype,"hass",2);customElements.define("hikvision-doorbell-button-editor",N);function bt(){document.querySelector("hikvision-doorbell-dialog")?console.debug("[hikvision-dialog] dialog already in DOM, skipping"):(console.debug("[hikvision-dialog] creating dialog element in DOM"),document.body.appendChild(document.createElement("hikvision-doorbell-dialog")))}document.body?bt():window.addEventListener("load",bt,{once:!0});console.info("%c HIKVISION-DOORBELL-CARD %c v0.2.3 ","color: white; background: #025a9e; font-weight: bold; padding: 2px 4px; border-radius: 3px 0 0 3px;","color: #025a9e; background: #e8f4fd; font-weight: bold; padding: 2px 4px; border-radius: 0 3px 3px 0;");
+        `}};_([m({attribute:!1})],N.prototype,"config",2),_([m({attribute:!1})],N.prototype,"hass",2);customElements.define("hikvision-doorbell-button-editor",N);function bt(){document.querySelector("hikvision-doorbell-dialog")?console.debug("[hikvision-dialog] dialog already in DOM, skipping"):(console.debug("[hikvision-dialog] creating dialog element in DOM"),document.body.appendChild(document.createElement("hikvision-doorbell-dialog")))}document.body?bt():window.addEventListener("load",bt,{once:!0});console.info("%c HIKVISION-DOORBELL-CARD %c v0.2.4 ","color: white; background: #025a9e; font-weight: bold; padding: 2px 4px; border-radius: 3px 0 0 3px;","color: #025a9e; background: #e8f4fd; font-weight: bold; padding: 2px 4px; border-radius: 0 3px 3px 0;");
 /*! Bundled license information:
 
 @lit/reactive-element/css-tag.js:
