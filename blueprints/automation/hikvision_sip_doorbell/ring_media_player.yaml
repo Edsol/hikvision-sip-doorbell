@@ -125,6 +125,18 @@ trigger:
     entity_id: !input call_state_sensor
     from: ringing
     id: stop
+  - platform: state
+    entity_id: !input call_state_sensor
+    to: answered
+    id: stop
+  - platform: state
+    entity_id: !input call_state_sensor
+    to: dismissed
+    id: stop
+  - platform: state
+    entity_id: !input call_state_sensor
+    to: idle
+    id: stop
 
 action:
   - choose:
@@ -163,8 +175,11 @@ action:
                       data:
                         media_content_type: music
                         media_content_id: "{{ sound_url }}"
-                - delay:
+                - wait_template: >
+                    {{ not is_state(trigger.entity_id, 'ringing') }}
+                  timeout:
                     seconds: "{{ repeat_interval }}"
+                  continue_on_timeout: true
 
       - conditions:
           - condition: trigger
