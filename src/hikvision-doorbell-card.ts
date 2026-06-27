@@ -655,12 +655,21 @@ class HikvisionDoorbellButtonEditor extends LitElement {
         this.config = config;
     }
 
-    private _changed(e: Event): void {
+    private _valueChanged(e: Event): void {
+        const target = e.target as HTMLInputElement & { value: string };
+        const key = target.dataset.key as keyof CardConfig;
+        this.dispatchEvent(new CustomEvent("config-changed", {
+            detail: { config: { ...this.config, [key]: target.value } },
+            bubbles: true,
+            composed: true,
+        }));
+    }
+
+    private _checkboxChanged(e: Event): void {
         const target = e.target as HTMLInputElement;
         const key = target.dataset.key as keyof CardConfig;
-        const value = target.type === "checkbox" ? target.checked : target.value;
         this.dispatchEvent(new CustomEvent("config-changed", {
-            detail: { config: { ...this.config, [key]: value } },
+            detail: { config: { ...this.config, [key]: target.checked } },
             bubbles: true,
             composed: true,
         }));
@@ -673,19 +682,19 @@ class HikvisionDoorbellButtonEditor extends LitElement {
                     label="Button label"
                     .value=${this.config.button_label ?? "Videocitofono"}
                     data-key="button_label"
-                    @change=${this._changed}
+                    @input=${this._valueChanged}
                 ></ha-textfield>
                 <ha-textfield
                     label="Camera entity (optional)"
                     .value=${this.config.camera_entity ?? ""}
                     data-key="camera_entity"
-                    @change=${this._changed}
+                    @input=${this._valueChanged}
                 ></ha-textfield>
                 <ha-formfield label="Hide button (popup only on incoming call)">
                     <ha-checkbox
                         .checked=${this.config.hide_button ?? false}
                         data-key="hide_button"
-                        @change=${this._changed}
+                        @change=${this._checkboxChanged}
                     ></ha-checkbox>
                 </ha-formfield>
             </div>
