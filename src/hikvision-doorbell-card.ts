@@ -594,6 +594,10 @@ class HikvisionDoorbellButton extends LitElement {
         `;
     }
 
+    static getStubConfig(): CardConfig {
+        return {};
+    }
+
     setConfig(config: CardConfig): void {
         this._config = config;
     }
