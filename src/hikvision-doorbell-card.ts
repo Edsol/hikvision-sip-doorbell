@@ -677,33 +677,13 @@ customElements.define("hikvision-doorbell-button", HikvisionDoorbellButton);
 
 class HikvisionDoorbellButtonEditor extends LitElement {
     @property({ attribute: false }) config: CardConfig = {};
+    @property({ attribute: false }) hass?: HomeAssistant;
 
     static get styles(): CSSResult {
         return css`
-            .form { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
-            .field { display: flex; flex-direction: column; gap: 4px; }
-            label { font-size: 12px; font-weight: 500; color: var(--secondary-text-color); }
-            input[type="text"] {
-                width: 100%;
-                box-sizing: border-box;
-                padding: 8px 12px;
-                border: 1px solid var(--divider-color, #e0e0e0);
-                border-radius: 4px;
-                background: var(--card-background-color, #fff);
-                color: var(--primary-text-color);
-                font-size: 14px;
-                outline: none;
-            }
-            input[type="text"]:focus {
-                border-color: var(--primary-color);
-            }
-            .checkbox-row {
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                font-size: 14px;
-                cursor: pointer;
-            }
+            .form { padding: 16px; display: flex; flex-direction: column; gap: 24px; }
+            .row { display: flex; flex-direction: column; gap: 4px; }
+            .label { font-size: 12px; font-weight: 500; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.4px; }
         `;
     }
 
@@ -711,12 +691,9 @@ class HikvisionDoorbellButtonEditor extends LitElement {
         this.config = config;
     }
 
-    private _changed(e: Event): void {
-        const target = e.target as HTMLInputElement;
-        const key = target.dataset.key as keyof CardConfig;
-        const value = target.type === "checkbox" ? target.checked : target.value;
+    private _selectorChanged(key: keyof CardConfig, e: CustomEvent): void {
         this.dispatchEvent(new CustomEvent("config-changed", {
-            detail: { config: { ...this.config, [key]: value } },
+            detail: { config: { ...this.config, [key]: e.detail.value } },
             bubbles: true,
             composed: true,
         }));
@@ -725,45 +702,42 @@ class HikvisionDoorbellButtonEditor extends LitElement {
     render(): TemplateResult {
         return html`
             <div class="form">
-                <div class="field">
-                    <label>Button label</label>
-                    <input
-                        type="text"
+                <div class="row">
+                    <div class="label">Button label</div>
+                    <ha-selector
+                        .hass=${this.hass}
+                        .selector=${{ text: {} }}
                         .value=${this.config.button_label ?? "Doorbell"}
-                        data-key="button_label"
-                        @change=${this._changed}
-                        placeholder="Doorbell"
-                    />
+                        @value-changed=${(e: CustomEvent) => this._selectorChanged("button_label", e)}
+                    ></ha-selector>
                 </div>
-                <div class="field">
-                    <label>Call state entity (for ringing animation)</label>
-                    <input
-                        type="text"
+                <div class="row">
+                    <div class="label">Call state entity (ringing animation)</div>
+                    <ha-selector
+                        .hass=${this.hass}
+                        .selector=${{ entity: { domain: "sensor" } }}
                         .value=${this.config.call_state_entity ?? ""}
-                        data-key="call_state_entity"
-                        @change=${this._changed}
-                        placeholder="sensor.doorbell_call_state"
-                    />
+                        @value-changed=${(e: CustomEvent) => this._selectorChanged("call_state_entity", e)}
+                    ></ha-selector>
                 </div>
-                <div class="field">
-                    <label>Camera entity (optional)</label>
-                    <input
-                        type="text"
+                <div class="row">
+                    <div class="label">Camera entity (optional)</div>
+                    <ha-selector
+                        .hass=${this.hass}
+                        .selector=${{ entity: { domain: "camera" } }}
                         .value=${this.config.camera_entity ?? ""}
-                        data-key="camera_entity"
-                        @change=${this._changed}
-                        placeholder="camera.doorbell"
-                    />
+                        @value-changed=${(e: CustomEvent) => this._selectorChanged("camera_entity", e)}
+                    ></ha-selector>
                 </div>
-                <label class="checkbox-row">
-                    <input
-                        type="checkbox"
-                        .checked=${this.config.hide_button ?? false}
-                        data-key="hide_button"
-                        @change=${this._changed}
-                    />
-                    Hide button (popup only on incoming call)
-                </label>
+                <div class="row">
+                    <ha-selector
+                        .hass=${this.hass}
+                        .selector=${{ boolean: {} }}
+                        .value=${this.config.hide_button ?? false}
+                        .label=${"Hide button (popup only on incoming call)"}
+                        @value-changed=${(e: CustomEvent) => this._selectorChanged("hide_button", e)}
+                    ></ha-selector>
+                </div>
             </div>
         `;
     }
