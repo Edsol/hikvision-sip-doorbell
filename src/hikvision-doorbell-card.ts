@@ -418,9 +418,11 @@ class HikvisionDoorbellDialog extends LitElement {
             `;
         }
 
+        const dialogWidth = this._popupSize === "small" ? "min(360px, 92vw)" : "min(560px, 92vw)";
         return html`
             <ha-dialog ?open=${this._open} @closed=${this._close} hideActions flexContent
-                class="size-${this._popupSize}">
+                class="size-${this._popupSize}"
+                style="--mdc-dialog-min-width:${dialogWidth};--mdc-dialog-max-width:${dialogWidth};--dialog-surface-width:${dialogWidth};">
                 <ha-dialog-header slot="heading">
                     <ha-icon-button slot="navigationIcon" @click=${this._close}>
                         <ha-icon icon="mdi:close"></ha-icon>
@@ -783,11 +785,20 @@ class HikvisionDoorbellButtonEditor extends LitElement {
                 padding-top: 8px; border-top: 1px solid var(--divider-color);
             }
             .extra-entity-row {
-                display: flex; align-items: center; gap: 8px;
+                display: grid;
+                grid-template-columns: 1fr auto;
+                grid-template-rows: auto auto;
+                gap: 6px 8px;
+                align-items: center;
             }
-            .extra-entity-row ha-selector { flex: 1; }
-            .extra-entity-row ha-selector.icon-selector { flex: 0 0 120px; }
-            .extra-entity-row ha-selector.label-selector { flex: 0 0 140px; }
+            .extra-entity-row ha-selector { grid-column: 1; }
+            .extra-entity-row .delete-btn { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+            .extra-entity-row .sub-row {
+                grid-column: 1;
+                display: flex;
+                gap: 8px;
+            }
+            .extra-entity-row .sub-row ha-selector { flex: 1; }
             ha-icon-button { --mdc-icon-button-size: 36px; --mdc-icon-size: 20px; }
             .add-btn {
                 display: flex; align-items: center; gap: 4px;
@@ -907,24 +918,24 @@ class HikvisionDoorbellButtonEditor extends LitElement {
                                 .value=${item.entity}
                                 @value-changed=${(e: CustomEvent) => this._extraEntityChanged(i, "entity", e)}
                             ></ha-selector>
-                            <ha-selector
-                                class="icon-selector"
-                                .hass=${this.hass}
-                                .selector=${{ icon: {} }}
-                                .value=${item.icon ?? ""}
-                                @value-changed=${(e: CustomEvent) => this._extraEntityChanged(i, "icon", e)}
-                            ></ha-selector>
-                            <ha-selector
-                                class="label-selector"
-                                .hass=${this.hass}
-                                .selector=${{ text: {} }}
-                                .value=${item.label ?? ""}
-                                .placeholder=${"Label (optional)"}
-                                @value-changed=${(e: CustomEvent) => this._extraEntityChanged(i, "label", e)}
-                            ></ha-selector>
-                            <ha-icon-button @click=${() => this._removeExtraEntity(i)}>
+                            <ha-icon-button class="delete-btn" @click=${() => this._removeExtraEntity(i)}>
                                 <ha-icon icon="mdi:delete"></ha-icon>
                             </ha-icon-button>
+                            <div class="sub-row">
+                                <ha-selector
+                                    .hass=${this.hass}
+                                    .selector=${{ icon: {} }}
+                                    .value=${item.icon ?? ""}
+                                    @value-changed=${(e: CustomEvent) => this._extraEntityChanged(i, "icon", e)}
+                                ></ha-selector>
+                                <ha-selector
+                                    .hass=${this.hass}
+                                    .selector=${{ text: {} }}
+                                    .value=${item.label ?? ""}
+                                    .placeholder=${"Label (optional)"}
+                                    @value-changed=${(e: CustomEvent) => this._extraEntityChanged(i, "label", e)}
+                                ></ha-selector>
+                            </div>
                         </div>
                     `)}
                     <button class="add-btn" @click=${this._addExtraEntity}>
