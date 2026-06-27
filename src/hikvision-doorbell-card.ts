@@ -607,6 +607,13 @@ class HikvisionDoorbellButton extends LitElement {
         return document.createElement("hikvision-doorbell-button-editor");
     }
 
+    connectedCallback(): void {
+        super.connectedCallback();
+        if (!document.querySelector("hikvision-doorbell-dialog")) {
+            document.body.appendChild(document.createElement("hikvision-doorbell-dialog"));
+        }
+    }
+
     setConfig(config: CardConfig): void {
         this._config = config;
     }
@@ -655,11 +662,12 @@ class HikvisionDoorbellButtonEditor extends LitElement {
         this.config = config;
     }
 
-    private _valueChanged(e: Event): void {
-        const target = e.target as HTMLInputElement & { value: string };
+    private _valueChanged(e: CustomEvent): void {
+        const target = e.target as HTMLElement & { dataset: DOMStringMap };
         const key = target.dataset.key as keyof CardConfig;
+        // ha-textfield fires "value-changed" with detail.value
         this.dispatchEvent(new CustomEvent("config-changed", {
-            detail: { config: { ...this.config, [key]: target.value } },
+            detail: { config: { ...this.config, [key]: e.detail.value } },
             bubbles: true,
             composed: true,
         }));
@@ -682,13 +690,13 @@ class HikvisionDoorbellButtonEditor extends LitElement {
                     label="Button label"
                     .value=${this.config.button_label ?? "Videocitofono"}
                     data-key="button_label"
-                    @input=${this._valueChanged}
+                    @value-changed=${this._valueChanged}
                 ></ha-textfield>
                 <ha-textfield
                     label="Camera entity (optional)"
                     .value=${this.config.camera_entity ?? ""}
                     data-key="camera_entity"
-                    @input=${this._valueChanged}
+                    @value-changed=${this._valueChanged}
                 ></ha-textfield>
                 <ha-formfield label="Hide button (popup only on incoming call)">
                     <ha-checkbox
@@ -710,10 +718,3 @@ console.info(
     "color: #025a9e; background: #e8f4fd; font-weight: bold; padding: 2px 4px; border-radius: 0 3px 3px 0;"
 );
 
-// ── Ensure dialog exists in DOM for SIP-Core auto-popup ───────────────────────
-window.addEventListener("load", () => {
-    if (!document.querySelector("hikvision-doorbell-dialog")) {
-        const el = document.createElement("hikvision-doorbell-dialog");
-        document.body.appendChild(el);
-    }
-});
