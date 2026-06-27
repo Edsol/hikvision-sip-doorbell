@@ -82,6 +82,8 @@ class HikvisionDoorbellDialog extends LitElement {
     @property({ type: Boolean }) _audioHeld = false;
     @property({ type: String }) cameraEntity: string | null = null;
     @property({ type: Object }) hass: HomeAssistant | null = null;
+    @property({ type: String }) popupSize: PopupSize | null = null;
+    @property({ type: String }) popupPosition: PopupPosition | null = null;
 
     private _holdTimer: ReturnType<typeof setTimeout> | null = null;
     private _holdInterval: ReturnType<typeof setInterval> | null = null;
@@ -377,11 +379,11 @@ class HikvisionDoorbellDialog extends LitElement {
     }
 
     private get _popupSize(): PopupSize {
-        return this._sipCore?.config?.popup_config?.popup_size ?? "large";
+        return this.popupSize ?? "large";
     }
 
     private get _popupPosition(): PopupPosition {
-        return this._sipCore?.config?.popup_config?.popup_position ?? "center";
+        return this.popupPosition ?? "center";
     }
 
     render(): TemplateResult {
@@ -445,11 +447,13 @@ class HikvisionDoorbellDialog extends LitElement {
             ha-dialog {
                 --mdc-dialog-min-width: min(560px, 92vw);
                 --mdc-dialog-max-width: min(560px, 92vw);
+                --dialog-surface-width: min(560px, 92vw);
                 --dialog-content-padding: 0;
             }
             ha-dialog.size-small {
                 --mdc-dialog-min-width: min(360px, 92vw);
                 --mdc-dialog-max-width: min(360px, 92vw);
+                --dialog-surface-width: min(360px, 92vw);
             }
 
             /* ── Anchored overlay (bottom-left / bottom-right) ── */
@@ -677,12 +681,11 @@ class HikvisionDoorbellButton extends LitElement {
     }
 
     private _applyPopupConfig(): void {
-        if (!window.sipCore) return;
-        if (!window.sipCore.config) window.sipCore.config = {};
-        if (!window.sipCore.config.popup_config) window.sipCore.config.popup_config = {};
-        if (this._config.popup_size) window.sipCore.config.popup_config.popup_size = this._config.popup_size;
-        if (this._config.popup_position) window.sipCore.config.popup_config.popup_position = this._config.popup_position;
-        if (this._config.camera_entity) window.sipCore.config.popup_config.camera_entity = this._config.camera_entity;
+        const dialog = document.querySelector("hikvision-doorbell-dialog") as (HikvisionDoorbellDialog & { popupSize: PopupSize | null; popupPosition: PopupPosition | null; cameraEntity: string | null }) | null;
+        if (!dialog) return;
+        dialog.popupSize = this._config.popup_size ?? null;
+        dialog.popupPosition = this._config.popup_position ?? null;
+        if (this._config.camera_entity) dialog.cameraEntity = this._config.camera_entity;
     }
 
     set hass(hass: HomeAssistant) {
