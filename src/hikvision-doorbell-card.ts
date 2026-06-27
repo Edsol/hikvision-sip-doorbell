@@ -651,12 +651,20 @@ class HikvisionDoorbellButton extends LitElement {
         return document.createElement("hikvision-doorbell-button-editor");
     }
 
+    private _onSipCoreUpdate = () => this._applyPopupConfig();
+
     connectedCallback(): void {
         super.connectedCallback();
         if (!document.querySelector("hikvision-doorbell-dialog")) {
             document.body.appendChild(document.createElement("hikvision-doorbell-dialog"));
         }
+        window.addEventListener("sipcore-update", this._onSipCoreUpdate);
         this._applyPopupConfig();
+    }
+
+    disconnectedCallback(): void {
+        super.disconnectedCallback();
+        window.removeEventListener("sipcore-update", this._onSipCoreUpdate);
     }
 
     setConfig(config: CardConfig): void {
