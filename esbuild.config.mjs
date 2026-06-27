@@ -1,6 +1,8 @@
 import * as esbuild from "esbuild";
+import { readFileSync } from "fs";
 
 const watch = process.argv.includes("--watch");
+const { version } = JSON.parse(readFileSync("package.json", "utf8"));
 
 const ctx = await esbuild.context({
     entryPoints: ["src/hikvision-doorbell-card.ts"],
@@ -10,6 +12,9 @@ const ctx = await esbuild.context({
     minify: !watch,
     sourcemap: watch ? "inline" : false,
     external: [],
+    define: {
+        __CARD_VERSION__: JSON.stringify(version),
+    },
 });
 
 if (watch) {

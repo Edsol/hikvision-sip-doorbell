@@ -44,6 +44,8 @@ interface CardConfig {
     button_label?: string;
 }
 
+declare const __CARD_VERSION__: string;
+
 declare global {
     interface Window {
         sipCore?: SipCoreInstance;
@@ -694,7 +696,7 @@ class HikvisionDoorbellButtonEditor extends LitElement {
 customElements.define("hikvision-doorbell-button-editor", HikvisionDoorbellButtonEditor);
 
 console.info(
-    "%c HIKVISION-DOORBELL-CARD %c v0.1.0 ",
+    `%c HIKVISION-DOORBELL-CARD %c v${__CARD_VERSION__} `,
     "color: white; background: #025a9e; font-weight: bold; padding: 2px 4px; border-radius: 3px 0 0 3px;",
     "color: #025a9e; background: #e8f4fd; font-weight: bold; padding: 2px 4px; border-radius: 0 3px 3px 0;"
 );
