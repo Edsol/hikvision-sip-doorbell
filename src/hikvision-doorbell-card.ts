@@ -36,11 +36,13 @@ interface SipCoreInstance {
 
 interface HomeAssistant {
     callService(domain: string, service: string, data: Record<string, unknown>): void;
+    formatEntityState(stateObj: Record<string, unknown>): string;
 }
 
 interface ExtraEntity {
     entity: string;
     icon?: string;
+    label?: string;
 }
 
 interface CardConfig {
@@ -703,17 +705,20 @@ class HikvisionDoorbellButton extends LitElement {
         if (!entities.length || !this._hass) return html``;
         return html`
             <div class="chips" @click=${(e: Event) => e.stopPropagation()}>
-                ${entities.map(({ entity, icon }) => {
-                    const state = this._hass!.states[entity];
-                    if (!state) return html``;
-                    const displayIcon = icon || state.attributes.icon || "mdi:dots-horizontal";
-                    const displayState = state.attributes.friendly_name
-                        ? `${state.attributes.friendly_name}: ${state.state}`
-                        : `${entity.split(".")[1]}: ${state.state}`;
+                ${entities.map(({ entity, icon, label }) => {
+                    const stateObj = this._hass!.states[entity];
+                    if (!stateObj) return html``;
+                    const displayIcon = icon || stateObj.attributes.icon || "mdi:dots-horizontal";
+                    const formattedState = this._hass!.formatEntityState
+                        ? this._hass!.formatEntityState(stateObj as unknown as Record<string, unknown>)
+                        : stateObj.state;
+                    const displayText = label
+                        ? `${label}: ${formattedState}`
+                        : formattedState;
                     return html`
                         <div class="chip">
                             <ha-icon icon=${displayIcon}></ha-icon>
-                            <span>${displayState}</span>
+                            <span>${displayText}</span>
                         </div>
                     `;
                 })}
@@ -782,6 +787,7 @@ class HikvisionDoorbellButtonEditor extends LitElement {
             }
             .extra-entity-row ha-selector { flex: 1; }
             .extra-entity-row ha-selector.icon-selector { flex: 0 0 120px; }
+            .extra-entity-row ha-selector.label-selector { flex: 0 0 140px; }
             ha-icon-button { --mdc-icon-button-size: 36px; --mdc-icon-size: 20px; }
             .add-btn {
                 display: flex; align-items: center; gap: 4px;
@@ -907,6 +913,14 @@ class HikvisionDoorbellButtonEditor extends LitElement {
                                 .selector=${{ icon: {} }}
                                 .value=${item.icon ?? ""}
                                 @value-changed=${(e: CustomEvent) => this._extraEntityChanged(i, "icon", e)}
+                            ></ha-selector>
+                            <ha-selector
+                                class="label-selector"
+                                .hass=${this.hass}
+                                .selector=${{ text: {} }}
+                                .value=${item.label ?? ""}
+                                .placeholder=${"Label (optional)"}
+                                @value-changed=${(e: CustomEvent) => this._extraEntityChanged(i, "label", e)}
                             ></ha-selector>
                             <ha-icon-button @click=${() => this._removeExtraEntity(i)}>
                                 <ha-icon icon="mdi:delete"></ha-icon>
