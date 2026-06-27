@@ -40,6 +40,8 @@ interface HomeAssistant {
 
 interface CardConfig {
     camera_entity?: string;
+    hide_button?: boolean;
+    button_label?: string;
 }
 
 declare global {
@@ -591,11 +593,16 @@ class HikvisionDoorbellButton extends LitElement {
             }
             ha-icon { --mdc-icon-size: 28px; color: var(--primary-color); }
             span { font-size: 16px; font-weight: 500; }
+            :host([hide-button]) ha-card { display: none; }
         `;
     }
 
     static getStubConfig(): CardConfig {
-        return {};
+        return { hide_button: false, button_label: "Videocitofono" };
+    }
+
+    static getConfigElement(): HTMLElement {
+        return document.createElement("hikvision-doorbell-button-editor");
     }
 
     setConfig(config: CardConfig): void {
@@ -607,10 +614,14 @@ class HikvisionDoorbellButton extends LitElement {
     }
 
     render(): TemplateResult {
+        if (this._config?.hide_button) {
+            return html``;
+        }
+        const label = this._config?.button_label ?? "Videocitofono";
         return html`
             <ha-card @click=${this._open}>
                 <ha-icon icon="mdi:doorbell-video"></ha-icon>
-                <span>Videocitofono</span>
+                <span>${label}</span>
             </ha-card>
         `;
     }
@@ -632,6 +643,55 @@ class HikvisionDoorbellButton extends LitElement {
 }
 
 customElements.define("hikvision-doorbell-button", HikvisionDoorbellButton);
+
+// ── Visual config editor ───────────────────────────────────────────────────────
+
+class HikvisionDoorbellButtonEditor extends LitElement {
+    @property({ attribute: false }) config: CardConfig = {};
+
+    setConfig(config: CardConfig): void {
+        this.config = config;
+    }
+
+    private _changed(e: Event): void {
+        const target = e.target as HTMLInputElement;
+        const key = target.dataset.key as keyof CardConfig;
+        const value = target.type === "checkbox" ? target.checked : target.value;
+        this.dispatchEvent(new CustomEvent("config-changed", {
+            detail: { config: { ...this.config, [key]: value } },
+            bubbles: true,
+            composed: true,
+        }));
+    }
+
+    render(): TemplateResult {
+        return html`
+            <div style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">
+                <ha-textfield
+                    label="Button label"
+                    .value=${this.config.button_label ?? "Videocitofono"}
+                    data-key="button_label"
+                    @change=${this._changed}
+                ></ha-textfield>
+                <ha-textfield
+                    label="Camera entity (optional)"
+                    .value=${this.config.camera_entity ?? ""}
+                    data-key="camera_entity"
+                    @change=${this._changed}
+                ></ha-textfield>
+                <ha-formfield label="Hide button (popup only on incoming call)">
+                    <ha-checkbox
+                        .checked=${this.config.hide_button ?? false}
+                        data-key="hide_button"
+                        @change=${this._changed}
+                    ></ha-checkbox>
+                </ha-formfield>
+            </div>
+        `;
+    }
+}
+
+customElements.define("hikvision-doorbell-button-editor", HikvisionDoorbellButtonEditor);
 
 console.info(
     "%c HIKVISION-DOORBELL-CARD %c v0.1.0 ",
