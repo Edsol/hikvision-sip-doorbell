@@ -208,6 +208,7 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         self.hass.async_create_task(self._async_write_routing_db())
         if self._sip_domain == DEFAULT_SIP_DOMAIN:
             self.hass.async_create_task(self._async_discover_sip_domain(force=False))
+        self.hass.async_create_task(self._async_subscribe_ami_call_events())
 
     async def async_unload(self) -> None:
         """Remove state listeners and persist state."""
@@ -215,6 +216,78 @@ class DoorbellCoordinator(DataUpdateCoordinator):
             unsub()
         self._unsub_listeners.clear()
         await self._async_save_state()
+        # Remove AMI event listeners
+        asterisk_data = self.hass.data.get("asterisk", {})
+        entry_data = next(iter(asterisk_data.values()), None)
+        if entry_data:
+            client = entry_data.get("client")
+            if client and hasattr(self, "_ami_bridge_listener"):
+                try:
+                    client.remove_event_listener(self._ami_bridge_listener)
+                    client.remove_event_listener(self._ami_hangup_listener)
+                except Exception:
+                    pass
+
+    async def _async_subscribe_ami_call_events(self) -> None:
+        """Listen to Asterisk AMI BridgeEnter/Hangup to update call_state when answered via SIP.
+
+        Hikvision addon only sends 'dismissed' when the doorbell panel closes the call —
+        it never sends 'answered' when a SIP client picks up. We detect the answer via
+        Asterisk's BridgeEnter event (fired when two call legs are bridged together).
+        """
+        # Wait for Asterisk integration
+        for _ in range(15):
+            if self.hass.data.get("asterisk"):
+                break
+            await asyncio.sleep(1)
+
+        asterisk_data = self.hass.data.get("asterisk", {})
+        entry_data = next(iter(asterisk_data.values()), None)
+        if entry_data is None:
+            _LOGGER.debug("AMI call events: Asterisk integration not available, skipping")
+            return
+
+        client = entry_data.get("client")
+        if client is None:
+            _LOGGER.debug("AMI call events: no AMI client found, skipping")
+            return
+
+        doorbell_ext = self._doorbell_ext
+
+        def _on_bridge_enter(event, **kwargs):
+            """BridgeEnter fires for each leg — we only care when doorbell is involved."""
+            keys = getattr(event, "keys", {}) if not isinstance(event, dict) else event
+            channel = keys.get("Channel", "")
+            # Doorbell channel contains its extension number
+            if doorbell_ext not in channel:
+                return
+            if self.call_state != "ringing":
+                return
+            _LOGGER.info("AMI BridgeEnter detected for doorbell — updating call_state to answered")
+            self.call_state = "answered"
+            self.hass.loop.call_soon_threadsafe(self.async_update_listeners)
+
+        def _on_hangup(event, **kwargs):
+            """Hangup fires when any channel closes — update to idle if we were active."""
+            keys = getattr(event, "keys", {}) if not isinstance(event, dict) else event
+            channel = keys.get("Channel", "")
+            if doorbell_ext not in channel:
+                return
+            if self.call_state not in ("ringing", "answered"):
+                return
+            _LOGGER.info("AMI Hangup detected for doorbell — updating call_state to idle")
+            self.call_state = "idle"
+            self.hass.loop.call_soon_threadsafe(self.async_update_listeners)
+
+        self._ami_bridge_listener = _on_bridge_enter
+        self._ami_hangup_listener = _on_hangup
+
+        try:
+            client.add_event_listener(_on_bridge_enter, white_list=["BridgeEnter"])
+            client.add_event_listener(_on_hangup, white_list=["Hangup"])
+            _LOGGER.info("AMI call event listeners registered (BridgeEnter, Hangup)")
+        except Exception as exc:
+            _LOGGER.warning("AMI call events: failed to register listeners: %s", exc)
 
     # ── SIP domain auto-discovery ─────────────────────────────────────────────
 
