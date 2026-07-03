@@ -259,10 +259,17 @@ class HikvisionDoorbellDialog extends LitElement {
         // provider connects straight to the go2rtc WebSocket URL and never
         // touches hass/callWS, so it's immune to that race.
         //
+        // proxy.live routes the go2rtc WebSocket through Home Assistant's
+        // hass-web-proxy integration (/api/hass_web_proxy/...). This keeps
+        // go2rtc on the LAN (never publicly exposed), reuses HA authentication,
+        // and — because the browser only ever talks to HA over HTTPS — avoids
+        // the mixed-content block you'd hit with a raw ws://LAN URL from an
+        // HTTPS page (e.g. behind Cloudflare). Requires the "Hass Web Proxy"
+        // integration to be installed in HA.
+        //
         // The stream name defaults to the camera entity slug (camera.videocitofono
         // → "videocitofono"); the go2rtc URL defaults to the current host on the
-        // standard go2rtc port 1984 (works for the common single-host setup and
-        // avoids mixed-content because go2rtc sends CORS origin:*).
+        // standard go2rtc port 1984.
         const stream = this.go2rtcStream
             ?? this._sipCore?.config?.popup_config?.go2rtc_stream
             ?? this._deviceSlug;
@@ -270,7 +277,11 @@ class HikvisionDoorbellDialog extends LitElement {
             ?? this._sipCore?.config?.popup_config?.go2rtc_url
             ?? (stream ? `http://${window.location.hostname}:1984` : null);
         const cameraConfig = (go2rtcUrl && stream)
-            ? { live_provider: "go2rtc", go2rtc: { url: go2rtcUrl, stream } }
+            ? {
+                live_provider: "go2rtc",
+                go2rtc: { url: go2rtcUrl, stream },
+                proxy: { live: true, dynamic: true },
+            }
             : { camera_entity: entity };
 
         const helpers = await window.loadCardHelpers();

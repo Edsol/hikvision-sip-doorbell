@@ -264,9 +264,18 @@ Two independent audio paths, keyed on `_callState`:
 - **Initial state sync.** On open, after ~1.5s, force `microphone_mute` (UI red)
   and `unmute` (UI green = audible) so the real stream state matches the UI.
 
-### Mixed content / production
+### Mixed content / production / security
 
 Browsers require HTTPS for `getUserMedia`, and block `ws://` (insecure) from an
 HTTPS page. Behind a public reverse proxy (e.g. Cloudflare) a LAN
-`http://…:1984` go2rtc URL is blocked. Proxy go2rtc behind the HTTPS reverse
-proxy and set `go2rtc_url` to that `https://…` URL (→ `wss://`).
+`http://…:1984` go2rtc URL is blocked.
+
+The card solves this with `proxy: { live: true, dynamic: true }` on the go2rtc
+camera config → the go2rtc WebSocket is routed through HA's **hass-web-proxy**
+integration (`/api/hass_web_proxy/v0/ws?url=…`). This:
+- keeps go2rtc on the LAN (never publicly exposed — its UI/API are unauthenticated);
+- reuses HA auth;
+- is same-origin HTTPS, so no mixed-content block.
+
+So `go2rtc_url` should be the **LAN** URL; do NOT expose go2rtc via a public
+tunnel. Requires the hass-web-proxy integration installed in HA.

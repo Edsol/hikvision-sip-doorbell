@@ -286,21 +286,34 @@ go2rtc provider and drives the microphone / audio + the doorbell's ISAPI
    served through Frigate, point `go2rtc_url` at Frigate's go2rtc instance.
 2. **HTTPS** — browsers only allow microphone access (`getUserMedia`) on secure
    origins.
-3. **No mixed content** — if HA is served over HTTPS, `go2rtc_url` must be
-   reachable over `https://`/`wss://` too. A plain `http://…:1984` on the LAN is
-   blocked by modern browsers when the page is HTTPS (especially behind a public
-   reverse proxy such as Cloudflare). Proxy go2rtc behind your HTTPS reverse
-   proxy and set `go2rtc_url` to that `https://…` URL.
+3. **The [Hass Web Proxy](https://github.com/dermotduffy/hass-web-proxy)
+   integration installed in HA.** The card routes the go2rtc WebSocket through
+   this proxy (`proxy.live: true`), which:
+   - keeps go2rtc **on the LAN — never publicly exposed** (exposing go2rtc
+     directly would let anyone view all your cameras, hear/talk through them, and
+     read RTSP credentials from its API);
+   - reuses HA's authentication (only logged-in HA users reach go2rtc);
+   - avoids the **mixed-content block** you'd otherwise hit from an HTTPS page
+     (e.g. behind Cloudflare) connecting to a `ws://` LAN URL — the browser only
+     ever talks to HA over HTTPS.
+
+   With the proxy, `go2rtc_url` is the **plain LAN URL** (e.g.
+   `http://192.168.1.4:1984`); it is dereferenced server-side by HA, so it never
+   needs to be publicly reachable.
 
 Example card config:
 
 ```yaml
 type: custom:hikvision-doorbell-button
 camera_entity: camera.videocitofono
-go2rtc_url: https://your-ha-host/go2rtc   # reverse-proxied go2rtc (wss)
-# go2rtc_stream: videocitofono            # optional, defaults to camera slug
+go2rtc_url: http://192.168.1.4:1984   # LAN URL — reached via HA's web proxy
+# go2rtc_stream: videocitofono        # optional, defaults to camera slug
 popup_size: large
 ```
+
+> **Do not** expose go2rtc directly through a Cloudflare Tunnel / public
+> hostname without authentication — its web UI and API are unauthenticated by
+> default. Use the Hass Web Proxy path above instead.
 
 ### Gate opening
 
