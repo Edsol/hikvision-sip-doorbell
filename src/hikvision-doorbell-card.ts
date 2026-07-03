@@ -5,9 +5,12 @@ import { property, state } from "lit/decorators.js";
 
 type PopupSize = "small" | "medium" | "large";
 type PopupPosition = "center" | "bottom-left" | "bottom-right";
+type GateOpenMode = "hold" | "direct";
 
 interface PopupConfig {
     camera_entity?: string;
+    go2rtc_url?: string;
+    go2rtc_stream?: string;
     gate_entity?: string;
     gate_hold_time?: number;
     close_on_gate?: boolean;
@@ -34,7 +37,13 @@ interface SipCoreInstance {
     endCall(): void;
 }
 
+interface HassStateObject {
+    state: string;
+    attributes: Record<string, unknown>;
+}
+
 interface HomeAssistant {
+    states: Record<string, HassStateObject | undefined>;
     callService(domain: string, service: string, data: Record<string, unknown>): void;
     formatEntityState(stateObj: Record<string, unknown>): string;
 }
@@ -47,12 +56,15 @@ interface ExtraEntity {
 
 interface CardConfig {
     camera_entity?: string;
+    go2rtc_url?: string;
+    go2rtc_stream?: string;
     hide_button?: boolean;
     button_label?: string;
     call_state_entity?: string;
     extra_entities?: ExtraEntity[];
     popup_size?: PopupSize;
     popup_position?: PopupPosition;
+    gate_open_mode?: GateOpenMode;
 }
 
 declare const __CARD_VERSION__: string;
@@ -83,9 +95,12 @@ class HikvisionDoorbellDialog extends LitElement {
     @property({ type: Boolean }) _micMuted = false;
     @property({ type: Boolean }) _audioHeld = false;
     @property({ type: String }) cameraEntity: string | null = null;
+    @property({ type: String }) go2rtcUrl: string | null = null;
+    @property({ type: String }) go2rtcStream: string | null = null;
     @property({ type: Object }) hass: HomeAssistant | null = null;
     @property({ type: String }) popupSize: PopupSize | null = null;
     @property({ type: String }) popupPosition: PopupPosition | null = null;
+    @property({ type: String }) gateOpenMode: GateOpenMode | null = null;
 
     private _holdTimer: ReturnType<typeof setTimeout> | null = null;
     private _holdInterval: ReturnType<typeof setInterval> | null = null;
@@ -97,6 +112,9 @@ class HikvisionDoorbellDialog extends LitElement {
     private _onSipUpdate = this._handleSipUpdate.bind(this);
     private _onCallStarted = this._handleCallStarted.bind(this);
     private _onCallEnded = this._handleCallEnded.bind(this);
+    private _onResize = () => {
+        if (this._open) this._injectDialogSizeStyle();
+    };
 
     connectedCallback(): void {
         super.connectedCallback();
@@ -104,6 +122,7 @@ class HikvisionDoorbellDialog extends LitElement {
         window.addEventListener("sipcore-update", this._onSipUpdate);
         window.addEventListener("sipcore-call-started", this._onCallStarted);
         window.addEventListener("sipcore-call-ended", this._onCallEnded);
+        window.addEventListener("resize", this._onResize);
     }
 
     disconnectedCallback(): void {
@@ -111,6 +130,7 @@ class HikvisionDoorbellDialog extends LitElement {
         window.removeEventListener("sipcore-update", this._onSipUpdate);
         window.removeEventListener("sipcore-call-started", this._onCallStarted);
         window.removeEventListener("sipcore-call-ended", this._onCallEnded);
+        window.removeEventListener("resize", this._onResize);
     }
 
     // ── SIP-Core event handlers ───────────────────────────────────────────────
@@ -151,6 +171,7 @@ class HikvisionDoorbellDialog extends LitElement {
         setTimeout(() => {
             this._callState = "idle";
             this._open = false;
+            this._teardownCameraCard();
         }, 2000);
     }
 
@@ -158,11 +179,65 @@ class HikvisionDoorbellDialog extends LitElement {
 
     openManual(): void {
         this._sipCore = window.sipCore ?? null;
+        this._micMuted = true;
+        this._audioHeld = false;
         this._open = true;
         this._ensureCameraCard();
+        // Sync the real stream state to the initial UI once the camera card and
+        // its stream exist:
+        //  - mic: UI shows red (muted) → force microphone_mute
+        //  - audio: UI shows green (playing) → force unmute, otherwise the
+        //    stream starts muted and you hear nothing until you toggle it.
+        setTimeout(() => {
+            this._triggerCameraAction("microphone_mute");
+            this._triggerCameraAction("unmute");
+        }, 1500);
     }
 
-    // ── Camera ────────────────────────────────────────────────────────────────
+    // ── Doorbell ISAPI two-way audio (manual / non-SIP path) ──────────────────
+    // When the popup is opened manually there is no SIP call, so audio flows
+    // through the Frigate/go2rtc backchannel. The Hikvision doorbell only opens
+    // its TwoWayAudio channel when explicitly told to (the same answer/hangup
+    // and audio-output buttons the official addon exposes). We derive those
+    // entity ids from the camera entity slug (e.g. camera.videocitofono →
+    // button.videocitofono_answer_call) and fall back gracefully if absent.
+
+    private get _deviceSlug(): string | null {
+        const entity = this.cameraEntity ?? this._sipCore?.config?.popup_config?.camera_entity;
+        if (!entity) return null;
+        const slug = entity.split(".")[1];
+        return slug || null;
+    }
+
+    private _doorbellEntity(domain: string, suffix: string): string | null {
+        const slug = this._deviceSlug;
+        if (!slug) return null;
+        const entityId = `${domain}.${slug}_${suffix}`;
+        const hass = this.hass ?? this._sipCore?.hass;
+        return hass?.states[entityId] ? entityId : null;
+    }
+
+    private _pressDoorbellButton(suffix: string): boolean {
+        const entityId = this._doorbellEntity("button", suffix);
+        const hass = this.hass ?? this._sipCore?.hass;
+        if (!entityId || !hass) return false;
+        hass.callService("button", "press", { entity_id: entityId });
+        return true;
+    }
+
+    private _sendIsapi(value: string): boolean {
+        const entityId = this._doorbellEntity("text", "isapi_request");
+        const hass = this.hass ?? this._sipCore?.hass;
+        if (!entityId || !hass) return false;
+        hass.callService("text", "set_value", { entity_id: entityId, value });
+        return true;
+    }
+
+    private _sleep(ms: number): Promise<void> {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // Camera ────────────────────────────────────────────────────────────────
 
     private async _ensureCameraCard(): Promise<void> {
         if (this._cameraCard || !window.loadCardHelpers) return;
@@ -177,13 +252,70 @@ class HikvisionDoorbellDialog extends LitElement {
             return;
         }
 
+        // Two-way audio requires the go2rtc live provider with a stream that
+        // carries the backchannel (rtsp + isapi://). We ALWAYS prefer go2rtc:
+        // the "ha" provider (ha-camera-stream) both lacks a backchannel AND
+        // crashes on callWS when hass isn't ready at first render. The go2rtc
+        // provider connects straight to the go2rtc WebSocket URL and never
+        // touches hass/callWS, so it's immune to that race.
+        //
+        // The stream name defaults to the camera entity slug (camera.videocitofono
+        // → "videocitofono"); the go2rtc URL defaults to the current host on the
+        // standard go2rtc port 1984 (works for the common single-host setup and
+        // avoids mixed-content because go2rtc sends CORS origin:*).
+        const stream = this.go2rtcStream
+            ?? this._sipCore?.config?.popup_config?.go2rtc_stream
+            ?? this._deviceSlug;
+        const go2rtcUrl = this.go2rtcUrl
+            ?? this._sipCore?.config?.popup_config?.go2rtc_url
+            ?? (stream ? `http://${window.location.hostname}:1984` : null);
+        const cameraConfig = (go2rtcUrl && stream)
+            ? { live_provider: "go2rtc", go2rtc: { url: go2rtcUrl, stream } }
+            : { camera_entity: entity };
+
         const helpers = await window.loadCardHelpers();
         this._cameraCard = await helpers.createCardElement({
             type: "custom:advanced-camera-card",
-            cameras: [{ camera_entity: entity }],
-            live: { show_image_during_load: true },
-            menu: { mode: "none" },
-            dimensions: { aspect_ratio: "16:9" },
+            cameras: [cameraConfig],
+            view: { default: "live" },
+            live: {
+                show_image_during_load: true,
+                controls: {
+                    builtin: false,
+                    title: { mode: "none" },
+                },
+                // always_connected keeps the go2rtc/Frigate WebRTC backchannel
+                // negotiated from the moment the stream loads, so external
+                // microphone_unmute actions actually have a channel to open.
+                // Without this the two-way audio channel is never established
+                // when the popup is opened manually (no SIP call in flight).
+                microphone: {
+                    always_connected: true,
+                    mute_after_microphone_mute_seconds: 90,
+                },
+                auto_mute: [],
+                auto_unmute: [],
+            },
+            media_viewer: {
+                controls: { builtin: false },
+            },
+            menu: {
+                style: "none",
+                buttons: {
+                    microphone: {
+                        enabled: true,
+                        type: "toggle",
+                    },
+                    mute: {
+                        enabled: true,
+                    },
+                },
+            },
+            status_bar: { style: "none" },
+            dimensions: {
+                aspect_ratio_mode: "static",
+                aspect_ratio: "16:9",
+            },
         });
 
         this._cameraCardEntity = entity;
@@ -202,6 +334,8 @@ class HikvisionDoorbellDialog extends LitElement {
                 if (ctx.state === "suspended") await ctx.resume();
             }
             await this._sipCore.answerCall();
+            this._micMuted = false;
+            this._audioHeld = false;
             this._callState = "active";
         } catch (e) {
             console.error("[doorbell] answer failed:", e);
@@ -213,50 +347,208 @@ class HikvisionDoorbellDialog extends LitElement {
         if (this._sipCore) this._sipCore.endCall();
         this._callState = "idle";
         this._open = false;
+        this._teardownCameraCard();
     }
 
     private _close(): void {
         if (this._callState === "ringing" || this._callState === "active") {
             this._hangup();
-        } else {
-            this._open = false;
+            return;
+        }
+        // Manual popup teardown. Always tear the mic/audio down — with
+        // always_connected:true the go2rtc microphone and stream keep running
+        // even after the dialog is hidden, which is why audio persisted after
+        // pressing X. Mute + disconnect the mic, close the doorbell's
+        // TwoWayAudio channel, then DESTROY the camera card so its WebRTC
+        // connection (and the OS mic indicator) actually stop.
+        this._triggerCameraAction("microphone_mute");
+        this._triggerCameraAction("microphone_disconnect");
+        this._sendIsapi("PUT /ISAPI/System/TwoWayAudio/channels/1/close");
+        this._teardownCameraCard();
+        this._micMuted = true;
+        this._audioHeld = false;
+        this._open = false;
+    }
+
+    private _teardownCameraCard(): void {
+        if (this._cameraCard) {
+            this._cameraCard.remove();
+            this._cameraCard = null;
+            this._cameraCardEntity = null;
         }
     }
 
-    private _toggleMic(): void {
-        if (!this._sipCore) return;
-        const session = this._sipCore.RTCSession;
-        if (session?.connection) {
-            const senders = session.connection.getSenders();
-            const audioSender = senders.find(s => s.track?.kind === "audio");
-            if (audioSender?.track) {
-                audioSender.track.enabled = this._micMuted;
-                this._micMuted = !audioSender.track.enabled;
-            } else {
-                const out = this._sipCore.outgoingAudio;
-                if (out) {
-                    out.muted = !out.muted;
-                    this._micMuted = out.muted;
+    private async _toggleMic(): Promise<void> {
+        const nextMuted = !this._micMuted;
+
+        if (this._callState === "active" && this._sipCore) {
+            const session = this._sipCore.RTCSession;
+            if (session?.connection) {
+                const senders = session.connection.getSenders();
+                const audioSender = senders.find(s => s.track?.kind === "audio");
+                if (audioSender?.track) {
+                    audioSender.track.enabled = !nextMuted;
+                } else {
+                    const out = this._sipCore.outgoingAudio;
+                    if (out) {
+                        out.muted = nextMuted;
+                    }
                 }
             }
+            this._micMuted = nextMuted;
+            this.requestUpdate();
+            return;
         }
+
+        // Manual (non-SIP) path: two-way audio over the go2rtc backchannel.
+        // Optimistically flip UI state first so the button reflects the action.
+        this._micMuted = nextMuted;
         this.requestUpdate();
+
+        if (!nextMuted) {
+            // microphone_unmute triggers getUserMedia, which REQUIRES an active
+            // user gesture. Fire it SYNCHRONOUSLY first (still inside the click)
+            // — awaiting a sleep before it lets the gesture expire and the
+            // browser silently blocks the mic, so audio flows in but not out.
+            // The doorbell answer/hangup (to open its TwoWayAudio channel) can
+            // safely happen after, they don't need a gesture.
+            this._triggerCameraAction("microphone_unmute");
+            this._pressDoorbellButton("answer_call");
+            await this._sleep(300);
+            this._pressDoorbellButton("hangup_call");
+            // Re-assert unmute after the channel is open, in case the first one
+            // raced the stream setup.
+            await this._sleep(200);
+            this._triggerCameraAction("microphone_unmute");
+        } else {
+            // Only mute — keep the mic CONNECTED (always_connected:true) so the
+            // next unmute reopens instantly. Disconnecting here made the next
+            // unmute flaky. Also close the doorbell's TwoWayAudio channel.
+            this._triggerCameraAction("microphone_mute");
+            this._sendIsapi("PUT /ISAPI/System/TwoWayAudio/channels/1/close");
+        }
     }
 
     private _toggleAudio(): void {
-        if (!this._sipCore) return;
-        const stream = this._sipCore.remoteAudioStream;
-        if (stream) {
-            const enabled = this._audioHeld; // if was muted, re-enable
-            stream.getAudioTracks().forEach(t => { t.enabled = enabled; });
-            this._audioHeld = !enabled;
+        const nextHeld = !this._audioHeld;
+
+        if (this._callState === "active" && this._sipCore) {
+            const stream = this._sipCore.remoteAudioStream;
+            if (stream) {
+                stream.getAudioTracks().forEach(t => { t.enabled = !nextHeld; });
+            }
+            if (this._sipCore.incomingAudio) {
+                this._sipCore.incomingAudio.muted = nextHeld;
+            }
+        } else {
+            // Manual (non-SIP) path: mute/unmute the incoming doorbell audio via
+            // the camera-card actions (which control the go2rtc stream playback)
+            // plus the local media elements as a fallback.
+            this._setCameraMediaMuted(nextHeld);
+            this._triggerCameraAction(nextHeld ? "mute" : "unmute");
         }
+
+        this._audioHeld = nextHeld;
         this.requestUpdate();
+    }
+
+    private _setCameraMediaMuted(muted: boolean): boolean {
+        const mediaElements = this._getCameraMediaElements();
+        mediaElements.forEach(media => {
+            media.muted = muted;
+            const stream = media.srcObject;
+            if (stream instanceof MediaStream) {
+                stream.getAudioTracks().forEach(track => { track.enabled = !muted; });
+            }
+        });
+        return mediaElements.length > 0;
+    }
+
+    private _getCameraMediaElements(): HTMLMediaElement[] {
+        if (!this._cameraCard) return [];
+        const media: HTMLMediaElement[] = [];
+        this._walkElements(this._cameraCard, element => {
+            if (element instanceof HTMLMediaElement) media.push(element);
+        });
+        return media;
+    }
+
+    private _clickCameraControl(keywords: string[]): boolean {
+        if (!this._cameraCard) return false;
+
+        let clicked = false;
+        this._walkElements(this._cameraCard, element => {
+            if (clicked || !(element instanceof HTMLElement)) return;
+            const text = [
+                element.getAttribute("aria-label"),
+                element.getAttribute("title"),
+                element.getAttribute("label"),
+                element.textContent,
+                element.getAttribute("icon"),
+                element.querySelector("ha-icon")?.getAttribute("icon"),
+            ].filter(Boolean).join(" ").toLowerCase();
+
+            if (keywords.some(keyword => text.includes(keyword))) {
+                element.click();
+                clicked = true;
+            }
+        });
+        return clicked;
+    }
+
+    private _triggerCameraAction(action: string): void {
+        // advanced-camera-card listens for "advanced-camera-card:action:execution-request"
+        // (NOT "advanced-camera-card-action"). The detail must carry an actions
+        // array whose entries are {action:"fire-dom-event", advanced_camera_card_action:<name>},
+        // exactly what the card's own menu buttons build internally.
+        if (!this._cameraCard) return;
+        this._cameraCard.dispatchEvent(new CustomEvent("advanced-camera-card:action:execution-request", {
+            bubbles: true,
+            composed: true,
+            detail: {
+                actions: [{ action: "fire-dom-event", advanced_camera_card_action: action }],
+            },
+        }));
+    }
+
+    private _walkElements(root: Element | ShadowRoot, callback: (element: Element) => void): void {
+        const visited = new WeakSet<Element | ShadowRoot>();
+        const stack: Array<{ node: Element | ShadowRoot; depth: number }> = [{ node: root, depth: 0 }];
+        const maxDepth = 12;
+
+        while (stack.length) {
+            const { node, depth } = stack.pop()!;
+            if (visited.has(node) || depth > maxDepth) continue;
+            visited.add(node);
+
+            if (node instanceof Element) callback(node);
+
+            const children = Array.from(node.children);
+            for (let i = children.length - 1; i >= 0; i -= 1) {
+                stack.push({ node: children[i], depth: depth + 1 });
+            }
+
+            if (node instanceof Element && node.shadowRoot && !visited.has(node.shadowRoot)) {
+                stack.push({ node: node.shadowRoot, depth: depth + 1 });
+            }
+        }
     }
 
     // ── Gate (hold to open) ───────────────────────────────────────────────────
 
+    private get _gateOpenMode(): GateOpenMode {
+        return this.gateOpenMode ?? "hold";
+    }
+
+    private _gateClick(e: Event): void {
+        if (this._gateOpenMode !== "direct") return;
+        e.preventDefault();
+        e.stopPropagation();
+        this._openGate();
+    }
+
     private _gateStart(e: Event): void {
+        if (this._gateOpenMode !== "hold") return;
         e.preventDefault();
         this._holding = true;
         this._holdProgress = 0;
@@ -277,6 +569,7 @@ class HikvisionDoorbellDialog extends LitElement {
     }
 
     private _gateEnd(): void {
+        if (this._gateOpenMode !== "hold") return;
         if (this._holdTimer) clearTimeout(this._holdTimer);
         if (this._holdInterval) clearInterval(this._holdInterval);
         this._holding = false;
@@ -301,22 +594,27 @@ class HikvisionDoorbellDialog extends LitElement {
         const isRinging = this._callState === "ringing";
         const isActive = this._callState === "active";
         const isEnded = this._callState === "ended";
+        const gateIsDirect = this._gateOpenMode === "direct";
+        const controlsAvailable = isActive ? Boolean(this._sipCore) : !isRinging && !isEnded;
 
         const gateButton = html`
-            <div class="gate-wrap">
-                <svg class="gate-progress" viewBox="0 0 44 44">
-                    <circle cx="22" cy="22" r="20" fill="none" stroke="var(--divider-color)" stroke-width="2"/>
-                    <circle cx="22" cy="22" r="20" fill="none"
-                        stroke="var(--warning-color, #f4b400)"
-                        stroke-width="2"
-                        stroke-dasharray="${2 * Math.PI * 20}"
-                        stroke-dashoffset="${2 * Math.PI * 20 * (1 - this._holdProgress / 100)}"
-                        transform="rotate(-90 22 22)"
-                        style="transition: stroke-dashoffset 0.05s linear"
-                    />
-                </svg>
+            <div class="gate-wrap ${gateIsDirect ? "direct" : "hold"}">
+                ${gateIsDirect ? "" : html`
+                    <svg class="gate-progress" viewBox="0 0 44 44">
+                        <circle cx="22" cy="22" r="20" fill="none" stroke="var(--divider-color)" stroke-width="2"/>
+                        <circle cx="22" cy="22" r="20" fill="none"
+                            stroke="var(--warning-color, #f4b400)"
+                            stroke-width="2"
+                            stroke-dasharray="${2 * Math.PI * 20}"
+                            stroke-dashoffset="${2 * Math.PI * 20 * (1 - this._holdProgress / 100)}"
+                            transform="rotate(-90 22 22)"
+                            style="transition: stroke-dashoffset 0.05s linear"
+                        />
+                    </svg>
+                `}
                 <ha-icon-button
                     class="btn gate-btn"
+                    @click=${this._gateClick}
                     @mousedown=${this._gateStart}
                     @mouseup=${this._gateEnd}
                     @mouseleave=${this._gateEnd}
@@ -347,13 +645,21 @@ class HikvisionDoorbellDialog extends LitElement {
         }
 
         const micButton = html`
-            <ha-icon-button class="btn ctrl-btn ${this._micMuted ? "muted" : ""}" @click=${this._toggleMic}>
+            <ha-icon-button
+                class="btn ctrl-btn ${this._micMuted ? "muted" : ""} ${controlsAvailable ? "" : "unavailable"}"
+                ?disabled=${!controlsAvailable}
+                @click=${this._toggleMic}
+            >
                 <ha-icon icon="${this._micMuted ? "mdi:microphone-off" : "mdi:microphone"}"></ha-icon>
             </ha-icon-button>
         `;
 
         const audioButton = html`
-            <ha-icon-button class="btn ctrl-btn ${this._audioHeld ? "muted" : ""}" @click=${this._toggleAudio}>
+            <ha-icon-button
+                class="btn ctrl-btn ${this._audioHeld ? "muted" : ""} ${controlsAvailable ? "" : "unavailable"}"
+                ?disabled=${!controlsAvailable}
+                @click=${this._toggleAudio}
+            >
                 <ha-icon icon="${this._audioHeld ? "mdi:volume-off" : "mdi:volume-high"}"></ha-icon>
             </ha-icon-button>
         `;
@@ -372,7 +678,7 @@ class HikvisionDoorbellDialog extends LitElement {
         }
 
         return html`
-            <div class="bottom-bar">
+            <div class="bottom-bar manual">
                 ${gateButton}
                 ${micButton}
                 ${audioButton}
@@ -394,6 +700,15 @@ class HikvisionDoorbellDialog extends LitElement {
 
     updated(): void {
         this._injectDialogSizeStyle();
+        // Keep the advanced-camera-card's hass continuously in sync. Without a
+        // valid hass the card's ha-camera-stream provider throws on callWS and
+        // the stream never establishes (or dies after the first render), which
+        // is the "works once" symptom. Pushing hass on every update keeps the
+        // go2rtc/backchannel stable across re-renders.
+        const hass = this.hass ?? this._sipCore?.hass ?? null;
+        if (this._cameraCard && hass) {
+            (this._cameraCard as LitElement & { hass: HomeAssistant }).hass = hass;
+        }
     }
 
     private _popupWidth(): string {
@@ -652,11 +967,16 @@ class HikvisionDoorbellDialog extends LitElement {
             .bottom-bar.ended ha-icon {
                 --mdc-icon-size: 18px;
             }
+            .bottom-bar.manual {
+                min-height: 72px;
+            }
             .btn {
                 --mdc-icon-button-size: 48px;
                 --mdc-icon-size: 22px;
                 border-radius: 50%;
                 color: var(--primary-text-color);
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
             }
             .accept-btn {
                 color: white;
@@ -692,16 +1012,52 @@ class HikvisionDoorbellDialog extends LitElement {
                 --mdc-icon-size: 24px;
                 color: var(--warning-color, #f4b400);
                 background: var(--secondary-background-color);
+                border-color: rgba(244, 180, 0, 0.28);
             }
             .ctrl-btn {
                 --mdc-icon-button-size: 48px;
                 --mdc-icon-size: 22px;
-                color: var(--primary-text-color);
-                background: var(--secondary-background-color);
+                color: white;
+                background: var(--success-color, #4caf50);
+                border-color: rgba(76, 175, 80, 0.38);
+                box-shadow: 0 3px 10px rgba(76, 175, 80, 0.24);
             }
             .ctrl-btn.muted {
-                color: var(--secondary-text-color);
-                opacity: 0.5;
+                color: white;
+                background: var(--error-color, #f44336);
+                border-color: rgba(244, 67, 54, 0.38);
+                box-shadow: 0 3px 10px rgba(244, 67, 54, 0.28);
+            }
+            .ctrl-btn.unavailable {
+                color: var(--disabled-text-color, rgba(0, 0, 0, 0.38));
+                background: var(--disabled-color, rgba(0, 0, 0, 0.12));
+                border-color: rgba(0, 0, 0, 0.08);
+                box-shadow: none;
+                opacity: 1;
+            }
+            ha-dialog.size-large .bottom-bar {
+                gap: clamp(36px, 8vw, 120px);
+                padding: 16px 20px 18px;
+                min-height: 84px;
+            }
+            ha-dialog.size-large .btn {
+                --mdc-icon-button-size: 56px;
+                --mdc-icon-size: 26px;
+            }
+            ha-dialog.size-large .accept-btn,
+            ha-dialog.size-large .deny-btn {
+                --mdc-icon-button-size: 68px;
+                --mdc-icon-size: 32px;
+            }
+            ha-dialog.size-large .gate-wrap,
+            ha-dialog.size-large .gate-progress {
+                width: 66px;
+                height: 66px;
+            }
+            ha-dialog.size-large .gate-btn,
+            ha-dialog.size-large .ctrl-btn {
+                --mdc-icon-button-size: 56px;
+                --mdc-icon-size: 26px;
             }
         `;
     }
@@ -796,11 +1152,21 @@ class HikvisionDoorbellButton extends LitElement {
     }
 
     private _applyPopupConfig(): void {
-        const dialog = document.querySelector("hikvision-doorbell-dialog") as (HikvisionDoorbellDialog & { popupSize: PopupSize | null; popupPosition: PopupPosition | null; cameraEntity: string | null }) | null;
+        const dialog = document.querySelector("hikvision-doorbell-dialog") as (HikvisionDoorbellDialog & {
+            popupSize: PopupSize | null;
+            popupPosition: PopupPosition | null;
+            gateOpenMode: GateOpenMode | null;
+            cameraEntity: string | null;
+            go2rtcUrl: string | null;
+            go2rtcStream: string | null;
+        }) | null;
         if (!dialog) return;
         dialog.popupSize = this._config.popup_size ?? null;
         dialog.popupPosition = this._config.popup_position ?? null;
+        dialog.gateOpenMode = this._config.gate_open_mode ?? null;
         if (this._config.camera_entity) dialog.cameraEntity = this._config.camera_entity;
+        dialog.go2rtcUrl = this._config.go2rtc_url ?? null;
+        dialog.go2rtcStream = this._config.go2rtc_stream ?? null;
     }
 
     set hass(hass: HomeAssistant) {
@@ -860,7 +1226,14 @@ class HikvisionDoorbellButton extends LitElement {
     }
 
     private _open(): void {
-        let dialog = document.querySelector<HikvisionDoorbellDialog & { cameraEntity: string | null; hass: HomeAssistant | null; openManual(): void }>("hikvision-doorbell-dialog");
+        let dialog = document.querySelector<HikvisionDoorbellDialog & {
+            cameraEntity: string | null;
+            go2rtcUrl: string | null;
+            go2rtcStream: string | null;
+            gateOpenMode: GateOpenMode | null;
+            hass: HomeAssistant | null;
+            openManual(): void;
+        }>("hikvision-doorbell-dialog");
         if (!dialog) {
             dialog = document.createElement("hikvision-doorbell-dialog") as typeof dialog;
             document.body.appendChild(dialog);
@@ -868,6 +1241,9 @@ class HikvisionDoorbellButton extends LitElement {
         if (this._config?.camera_entity) {
             dialog.cameraEntity = this._config.camera_entity;
         }
+        dialog.go2rtcUrl = this._config.go2rtc_url ?? null;
+        dialog.go2rtcStream = this._config.go2rtc_stream ?? null;
+        dialog.gateOpenMode = this._config.gate_open_mode ?? null;
         if (this._hass) {
             dialog.hass = this._hass;
         }
@@ -1008,6 +1384,24 @@ class HikvisionDoorbellButtonEditor extends LitElement {
                     ></ha-selector>
                 </div>
                 <div class="row">
+                    <div class="section-label">go2rtc URL (for two-way audio, e.g. http://192.168.1.4:1984)</div>
+                    <ha-selector
+                        .hass=${this.hass}
+                        .selector=${{ text: {} }}
+                        .value=${this.config.go2rtc_url ?? ""}
+                        @value-changed=${(e: CustomEvent) => this._selectorChanged("go2rtc_url", e)}
+                    ></ha-selector>
+                </div>
+                <div class="row">
+                    <div class="section-label">go2rtc stream name (defaults to camera entity slug)</div>
+                    <ha-selector
+                        .hass=${this.hass}
+                        .selector=${{ text: {} }}
+                        .value=${this.config.go2rtc_stream ?? ""}
+                        @value-changed=${(e: CustomEvent) => this._selectorChanged("go2rtc_stream", e)}
+                    ></ha-selector>
+                </div>
+                <div class="row">
                     <div class="section-label">Popup position</div>
                     <ha-selector
                         .hass=${this.hass}
@@ -1027,6 +1421,18 @@ class HikvisionDoorbellButtonEditor extends LitElement {
                         .selector=${{ select: { options: popupSizeOptions, mode: "dropdown" } }}
                         .value=${popupSizeValue}
                         @value-changed=${(e: CustomEvent) => this._selectorChanged("popup_size", e)}
+                    ></ha-selector>
+                </div>
+                <div class="row">
+                    <div class="section-label">Gate open mode</div>
+                    <ha-selector
+                        .hass=${this.hass}
+                        .selector=${{ select: { options: [
+                            { value: "hold", label: "Hold to open" },
+                            { value: "direct", label: "Open directly" },
+                        ], mode: "dropdown" } }}
+                        .value=${this.config.gate_open_mode ?? "hold"}
+                        @value-changed=${(e: CustomEvent) => this._selectorChanged("gate_open_mode", e)}
                     ></ha-selector>
                 </div>
                 <div class="row">

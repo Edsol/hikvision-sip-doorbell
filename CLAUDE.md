@@ -218,6 +218,55 @@ sensor.py       ← call_state (operational) + diagnostic sensors + behavior_sum
 button.py       ← DiscoverSipDomainButton, SimulateRingButton, SyncRoutingDbButton
 strings.json    ← translation source of truth (update first, then sync en.json and it.json)
 translations/   ← en.json, it.json
-www/            ← hikvision-doorbell-card.js (Lovelace card for SIP-Core popup)
+www/            ← hikvision-doorbell-card.js (built Lovelace card; source in src/, build via `npm run build`)
+src/            ← hikvision-doorbell-card.ts (card source — edit here, then rebuild)
 docs/           ← architecture.md, asterisk-setup.md, asterisk_integration.md
 ```
+
+---
+
+## Lovelace card — two-way audio (src/hikvision-doorbell-card.ts)
+
+The card is TypeScript, built with esbuild (`npm run build` → `www/hikvision-doorbell-card.js`).
+Bump `version` in `package.json`; it is injected as `__CARD_VERSION__`. HACS
+distributes the built `www/` file per `hacs.json` (`filename`).
+
+Two independent audio paths, keyed on `_callState`:
+
+- **SIP call** (`active`): audio flows through SIP-Core's `RTCSession` /
+  `remoteAudioStream` / `outgoingAudio`. Mic/audio toggles manipulate those.
+- **Manual open** (`openManual`, no SIP call): audio flows through the
+  **go2rtc backchannel** rendered by the embedded `advanced-camera-card`.
+
+### Manual two-way audio — hard-won details
+
+- **Provider MUST be go2rtc.** `_ensureCameraCard()` forces
+  `live_provider: "go2rtc"` with `{url, stream}`. The `ha` provider
+  (`ha-camera-stream`) has no backchannel AND throws on `callWS` when `hass`
+  isn't ready at first render. go2rtc connects straight to the WebSocket URL and
+  never touches `hass`.
+- **Camera-card actions use a specific event.** `_triggerCameraAction()`
+  dispatches `advanced-camera-card:action:execution-request` with
+  `detail.actions = [{ action: "fire-dom-event", advanced_camera_card_action: <name> }]`.
+  The old `advanced-camera-card-action` event name is NOT listened for.
+- **microphone_unmute needs a user gesture.** It triggers `getUserMedia`, so it
+  is fired **synchronously** at the top of the click handler, before any
+  `await`. Awaiting first lets the gesture expire → audio flows IN but not OUT.
+- **Doorbell TwoWayAudio channel.** Unmute presses `button.<slug>_answer_call`
+  then `_hangup_call` (opens the channel, stops ringing); close sends
+  `text.<slug>_isapi_request = "PUT /ISAPI/System/TwoWayAudio/channels/1/close"`.
+  Entities are derived from the camera entity slug and existence-checked in
+  `hass.states`.
+- **Teardown on close.** `always_connected:true` keeps the mic/stream alive; the
+  dialog being hidden is not enough. `_close()`/`_hangup()`/`_handleCallEnded()`
+  call `_teardownCameraCard()` which `.remove()`s the card so the WebRTC
+  connection and OS mic indicator actually stop. Reopen recreates it.
+- **Initial state sync.** On open, after ~1.5s, force `microphone_mute` (UI red)
+  and `unmute` (UI green = audible) so the real stream state matches the UI.
+
+### Mixed content / production
+
+Browsers require HTTPS for `getUserMedia`, and block `ws://` (insecure) from an
+HTTPS page. Behind a public reverse proxy (e.g. Cloudflare) a LAN
+`http://…:1984` go2rtc URL is blocked. Proxy go2rtc behind the HTTPS reverse
+proxy and set `go2rtc_url` to that `https://…` URL (→ `wss://`).

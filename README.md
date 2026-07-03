@@ -237,7 +237,7 @@ users:
 
 > **Note:** `ice_config` and STUN servers are not needed for LAN-only setups. Omit them to keep the config minimal.
 
-> **Note:** `camera_entity`, `popup_size`, and `popup_position` are configured directly in the **Lovelace card** (visual editor), not in SIP-Core. This way they are managed from the dashboard without touching the SIP-Core config.
+> **Note:** `camera_entity`, `popup_size`, `popup_position`, and `gate_open_mode` are configured directly in the **Lovelace card** (visual editor), not in SIP-Core. This way they are managed from the dashboard without touching the SIP-Core config.
 
 ### popup_config reference
 
@@ -249,17 +249,62 @@ users:
 
 ### Card popup settings
 
-`camera_entity`, `popup_size`, and `popup_position` are set in the card visual editor (or via YAML):
+`camera_entity`, `popup_size`, `popup_position`, and `gate_open_mode` are set in the card visual editor (or via YAML):
 
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `camera_entity` | string | — | HA camera entity to show as live feed in the popup |
+| `go2rtc_url` | string | `http://<host>:1984` | go2rtc base URL used for the live stream **and two-way audio backchannel**. Defaults to the current host on port 1984. See "Two-way audio" below |
+| `go2rtc_stream` | string | camera entity slug | go2rtc stream name. Defaults to the `camera_entity` slug (e.g. `camera.videocitofono` → `videocitofono`) |
 | `popup_size` | `small` / `medium` / `large` | `medium` | Width of the popup — center supports all sizes; corner popups support `small` and `medium` |
 | `popup_position` | `center` / `bottom-left` / `bottom-right` | `center` | `center` uses the standard HA dialog; `bottom-left`/`bottom-right` renders a floating overlay in the corner |
+| `gate_open_mode` | `hold` / `direct` | `hold` | `hold` requires pressing the gate button for `gate_hold_time`; `direct` opens with a single click/tap |
+
+### Two-way audio (talk & listen)
+
+The popup supports two-way audio with the doorbell — both when answering an
+incoming SIP call and when the popup is opened **manually** from the dashboard.
+
+Two-way audio uses the **go2rtc** live provider (via the
+[Advanced Camera Card](https://github.com/dermotduffy/advanced-camera-card)),
+because it carries the audio backchannel to the doorbell. The card forces the
+go2rtc provider and drives the microphone / audio + the doorbell's ISAPI
+`TwoWayAudio` channel automatically:
+
+- **Microphone** button: opens the doorbell's two-way audio channel
+  (`answer_call` → `hangup_call`) and unmutes the browser mic. Unmute is fired
+  synchronously on click so the browser grants microphone access (it requires a
+  user gesture).
+- **Audio** button: mutes/unmutes the incoming doorbell audio.
+- Closing the popup tears the microphone down and sends
+  `PUT /ISAPI/System/TwoWayAudio/channels/1/close`.
+
+**Requirements:**
+
+1. A go2rtc stream for the doorbell **with a two-way-audio backchannel**
+   (e.g. `rtsp://…#backchannel=0` + `isapi://…`). If the doorbell camera is
+   served through Frigate, point `go2rtc_url` at Frigate's go2rtc instance.
+2. **HTTPS** — browsers only allow microphone access (`getUserMedia`) on secure
+   origins.
+3. **No mixed content** — if HA is served over HTTPS, `go2rtc_url` must be
+   reachable over `https://`/`wss://` too. A plain `http://…:1984` on the LAN is
+   blocked by modern browsers when the page is HTTPS (especially behind a public
+   reverse proxy such as Cloudflare). Proxy go2rtc behind your HTTPS reverse
+   proxy and set `go2rtc_url` to that `https://…` URL.
+
+Example card config:
+
+```yaml
+type: custom:hikvision-doorbell-button
+camera_entity: camera.videocitofono
+go2rtc_url: https://your-ha-host/go2rtc   # reverse-proxied go2rtc (wss)
+# go2rtc_stream: videocitofono            # optional, defaults to camera slug
+popup_size: large
+```
 
 ### Gate opening
 
-- **From the popup (at_home)**: hold the gate button for `gate_hold_time` seconds. If `close_on_gate: true`, the call ends and the popup closes automatically 500ms after the gate opens.
+- **From the popup (at_home)**: use the card's `gate_open_mode`. In `hold` mode, hold the gate button for `gate_hold_time` seconds. In `direct` mode, click/tap once. If `close_on_gate: true`, the call ends and the popup closes automatically 500ms after the gate opens.
 - **From mobile (away_from_home)**: press `#` on the phone keypad during an active call. Asterisk forwards the DTMF to the doorbell panel automatically — no extra configuration needed.
 
 ---
