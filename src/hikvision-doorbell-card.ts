@@ -108,13 +108,30 @@ class HikvisionDoorbellDialog extends LitElement {
     private _cameraCard: HTMLElement | null = null;
     private _cameraCardEntity: string | null = null;
     private _sipCore: SipCoreInstance | null = null;
+    private _cameraResizeObserver: ResizeObserver | null = null;
 
     private _onSipUpdate = this._handleSipUpdate.bind(this);
     private _onCallStarted = this._handleCallStarted.bind(this);
     private _onCallEnded = this._handleCallEnded.bind(this);
     private _onResize = () => {
-        if (this._open) this._injectDialogSizeStyle();
+        if (!this._open) return;
+        this._injectDialogSizeStyle();
+        // The advanced-camera-card sizes its video via an internal
+        // ResizeObserver, but it doesn't always pick up a change to its dialog
+        // container (e.g. when devtools opens/closes and the window resizes).
+        // Nudge it to re-measure after the dialog width has been reapplied.
+        this._nudgeCameraCardResize();
     };
+
+    private _nudgeCameraCardResize(): void {
+        if (!this._cameraCard) return;
+        // Two rAFs so the dialog's new width is committed to layout first, then
+        // tell the camera card directly to re-measure. Dispatch only on the card
+        // (not window) to avoid re-triggering our own window resize handler.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            this._cameraCard?.dispatchEvent(new Event("resize"));
+        }));
+    }
 
     connectedCallback(): void {
         super.connectedCallback();
@@ -131,6 +148,8 @@ class HikvisionDoorbellDialog extends LitElement {
         window.removeEventListener("sipcore-call-started", this._onCallStarted);
         window.removeEventListener("sipcore-call-ended", this._onCallEnded);
         window.removeEventListener("resize", this._onResize);
+        this._cameraResizeObserver?.disconnect();
+        this._cameraResizeObserver = null;
     }
 
     // ── SIP-Core event handlers ───────────────────────────────────────────────
@@ -324,8 +343,12 @@ class HikvisionDoorbellDialog extends LitElement {
             },
             status_bar: { style: "none" },
             dimensions: {
-                aspect_ratio_mode: "static",
-                aspect_ratio: "16:9",
+                // "unconstrained" makes the card fill its container instead of
+                // self-sizing to a fixed measurement taken at creation. Our
+                // .camera-wrap already enforces the 16:9 box via CSS, so the
+                // video now follows the dialog width on resize (e.g. when
+                // devtools opens/closes) instead of staying at the old size.
+                aspect_ratio_mode: "unconstrained",
             },
         });
 
@@ -720,6 +743,22 @@ class HikvisionDoorbellDialog extends LitElement {
         if (this._cameraCard && hass) {
             (this._cameraCard as LitElement & { hass: HomeAssistant }).hass = hass;
         }
+        this._observeCameraWrap();
+    }
+
+    private _observeCameraWrap(): void {
+        // A ResizeObserver on the camera container fires whenever its real size
+        // changes — including devtools CLOSING (which the window "resize" event
+        // doesn't reliably deliver in time). On each change, nudge the camera
+        // card to re-measure so the video follows the container.
+        const wrap = this.shadowRoot?.querySelector(".camera-wrap");
+        if (!wrap) return;
+        if (!this._cameraResizeObserver) {
+            this._cameraResizeObserver = new ResizeObserver(() => this._nudgeCameraCardResize());
+        } else {
+            this._cameraResizeObserver.disconnect();
+        }
+        this._cameraResizeObserver.observe(wrap);
     }
 
     private _popupWidth(): string {
@@ -737,6 +776,15 @@ class HikvisionDoorbellDialog extends LitElement {
     private _injectDialogSizeStyle(attempt = 0): void {
         const haDialog = this.shadowRoot?.querySelector("ha-dialog");
         if (!haDialog) return;
+
+        // On mobile HA renders ha-dialog fullscreen; forcing a fixed width fights
+        // that and leaves the content mis-sized. Let HA's native fullscreen win.
+        if (window.matchMedia("(max-width: 600px)").matches) {
+            haDialog.style.removeProperty("width");
+            haDialog.style.removeProperty("max-width");
+            haDialog.style.setProperty("--dialog-content-padding", "0");
+            return;
+        }
 
         const width = this._popupWidth();
         haDialog.style.setProperty("--mdc-dialog-min-width", width);
@@ -934,6 +982,24 @@ class HikvisionDoorbellDialog extends LitElement {
             }
             .center-content {
                 padding: 0;
+            }
+            /* Mobile / narrow screens: below ~600px HA renders ha-dialog
+               fullscreen, so the surface is full-height while our content stays
+               glued to the top with a large empty area below. Center the video +
+               controls vertically and let the video fill the width. */
+            @media (max-width: 600px) {
+                .content.center-content {
+                    height: 100%;
+                    min-height: 100dvh;
+                    justify-content: center;
+                }
+                .center-content .camera-wrap {
+                    aspect-ratio: 16 / 9;
+                    max-height: 70dvh;
+                }
+                .center-content .camera-wrap > * {
+                    object-fit: contain;
+                }
             }
             .camera-wrap {
                 width: 100%;
