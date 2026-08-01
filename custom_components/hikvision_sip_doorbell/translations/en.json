@@ -33,6 +33,7 @@
           "doorbell_extension": "Doorbell SIP endpoint (select from Asterisk)",
           "internal_extension": "Indoor SIP endpoint to ring (select from Asterisk)",
           "extra_internal_extensions": "Additional indoor SIP endpoints (ring together)",
+          "monitor_state_entity": "Indoor monitor MQTT sensor (optional, diagnostics)",
           "sip_trunk": "SIP trunk for external calls (select from Asterisk)",
           "sip_domain": "VoIP domain for external calls (e.g. sip.example.com)"
         },
@@ -66,6 +67,7 @@
           "doorbell_extension": "Doorbell SIP endpoint",
           "internal_extension": "Indoor SIP endpoint",
           "extra_internal_extensions": "Additional indoor SIP endpoints (ring together)",
+          "monitor_state_entity": "Indoor monitor MQTT sensor (optional, diagnostics)",
           "sip_trunk": "SIP trunk for external calls",
           "sip_domain": "VoIP domain for external calls"
         }

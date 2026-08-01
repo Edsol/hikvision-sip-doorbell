@@ -27,6 +27,7 @@ from .const import (
     CONF_EXTRA_INTERNAL_EXTENSIONS,
     CONF_INTERNAL_EXTENSION,
     CONF_MODE_PHONE_MAP,
+    CONF_MONITOR_STATE_ENTITY,
     CONF_SIP_DOMAIN,
     CONF_SIP_TRUNK,
     DEFAULT_SIP_DOMAIN,
@@ -49,6 +50,13 @@ _MQTT_SENSOR_SELECTOR = EntitySelector(
 _ASTERISK_ENDPOINT_SELECTOR = EntitySelector(
     EntitySelectorConfig(
         filter=EntityFilterSelectorConfig(integration="asterisk", domain="binary_sensor"),
+        multiple=False,
+    )
+)
+
+_MQTT_SENSOR_OPTIONAL_SELECTOR = EntitySelector(
+    EntitySelectorConfig(
+        filter=EntityFilterSelectorConfig(integration="mqtt", domain="sensor"),
         multiple=False,
     )
 )
@@ -258,6 +266,11 @@ class HikvisionSipDoorbellOptionsFlow(config_entries.OptionsFlow):
                 e for e in dict.fromkeys(extras) if e != primary
             ]
 
+            # optional monitor sensor: stored as an entity_id, cleared when unset
+            user_input[CONF_MONITOR_STATE_ENTITY] = user_input.get(
+                CONF_MONITOR_STATE_ENTITY, ""
+            ) or ""
+
             trunk_value = user_input.get(CONF_SIP_TRUNK, "")
             if trunk_value and "." in trunk_value:
                 resolved = _endpoint_name_from_entity(self.hass, trunk_value)
@@ -294,6 +307,7 @@ class HikvisionSipDoorbellOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_DOORBELL_EXTENSION, default=doorbell_default): _ASTERISK_ENDPOINT_SELECTOR,
                 vol.Required(CONF_INTERNAL_EXTENSION, default=internal_default): _ASTERISK_ENDPOINT_SELECTOR,
                 vol.Optional(CONF_EXTRA_INTERNAL_EXTENSIONS, default=extras_default): _ASTERISK_ENDPOINTS_SELECTOR,
+                vol.Optional(CONF_MONITOR_STATE_ENTITY, default=data.get(CONF_MONITOR_STATE_ENTITY, "")): _MQTT_SENSOR_OPTIONAL_SELECTOR,
                 vol.Required(CONF_SIP_TRUNK, default=trunk_default): _ASTERISK_ENDPOINT_SELECTOR,
                 vol.Required(CONF_SIP_DOMAIN, default=data.get(CONF_SIP_DOMAIN, DEFAULT_SIP_DOMAIN)): str,
             }),

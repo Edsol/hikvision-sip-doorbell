@@ -46,6 +46,8 @@ Call state is tracked via `async_track_state_change_event` on the existing HA MQ
 | `select.py` | `select.internal_fallback` | wait / call_external / none — `EntityCategory.CONFIG` |
 | `select.py` | `select.number_to_call` | Friendly names of `input_text` entities for current mode — `EntityCategory.CONFIG` |
 | `sensor.py` | `sensor.call_state` | Operational — idle / ringing / answered / dismissed |
+| `sensor.py` | `sensor.last_answered_by` | Operational — extension that picked up (e.g. `6003`), `none` when idle; derived from AMI `BridgeEnter` |
+| `sensor.py` | `sensor.indoor_monitor_state` | `EntityCategory.DIAGNOSTIC` — only created when `monitor_state_entity` is configured |
 | `sensor.py` | `sensor.doorbell_extension`, `sensor.internal_extension`, `sensor.sip_trunk`, `sensor.sip_domain` | `EntityCategory.DIAGNOSTIC` |
 | `sensor.py` | `sensor.behavior_summary` | `EntityCategory.DIAGNOSTIC` — human-readable description of current routing behaviour |
 | `button.py` | `button.discover_sip_domain` | `EntityCategory.DIAGNOSTIC` — manual SIP domain re-discovery |
@@ -65,6 +67,7 @@ Call state is tracked via `async_track_state_change_event` on the existing HA MQ
     "doorbell_extension": "6001",
     "internal_extension": "6002",
     "extra_internal_extensions": ["6003"],  # rung in parallel with the primary
+    "monitor_state_entity": "sensor.monitor_call_state",  # optional, diagnostics only
     "sip_trunk": "PJSIP/my-trunk/",
     "sip_domain": "sip.example.com",        # auto-discovered, starts as placeholder
     "enabled_modes": ["at_home", "away_from_home", "deactivated"],  # always includes deactivated
@@ -89,6 +92,7 @@ Call state is tracked via `async_track_state_change_event` on the existing HA MQ
 | `doorbell_extension` | Asterisk binary_sensor | `_endpoint_name_from_entity()` → e.g. `6001` |
 | `internal_extension` | Asterisk binary_sensor | same → e.g. `6002` |
 | `extra_internal_extensions` | Asterisk binary_sensor (multiple) | same, list → e.g. `["6003"]`; primary is filtered out |
+| `monitor_state_entity` | MQTT sensor (optional) | stored as entity_id; an indoor monitor exposed by the Hikvision addon |
 | `sip_trunk` | Asterisk binary_sensor | stored as `PJSIP/<name>/` |
 | `sip_domain` | Free text | Default `sip.example.com` — auto-discovered post-setup |
 

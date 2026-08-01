@@ -9,6 +9,7 @@ CONF_DEVICE_ID = "device_id"                # MQTT device topic identifier (e.g.
 CONF_DOORBELL_EXTENSION = "doorbell_extension"  # SIP number of the doorbell panel (e.g. "6001")
 CONF_INTERNAL_EXTENSION = "internal_extension"  # Asterisk PJSIP extension to ring indoors (e.g. "6002")
 CONF_EXTRA_INTERNAL_EXTENSIONS = "extra_internal_extensions"  # additional indoor extensions rung in parallel (e.g. ["6003"])
+CONF_MONITOR_STATE_ENTITY = "monitor_state_entity"  # optional: MQTT call_state sensor of an indoor monitor (diagnostics only)
 CONF_SIP_TRUNK = "sip_trunk"                # Asterisk trunk prefix (e.g. "PJSIP/iliad-trunk/")
 CONF_SIP_DOMAIN = "sip_domain"              # VoIP domain for external calls (e.g. "voip.iliad.it")
 

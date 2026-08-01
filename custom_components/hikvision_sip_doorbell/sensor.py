@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_DEVICE_ID,
+    CONF_MONITOR_STATE_ENTITY,
     DOMAIN,
 )
 from .coordinator import DoorbellCoordinator
@@ -37,6 +38,12 @@ SENSOR_DESCRIPTIONS: tuple[DoorbellSensorDescription, ...] = (
         name="Call State",
         icon="mdi:phone-ring",
         value_fn=lambda c: c.call_state,
+    ),
+    DoorbellSensorDescription(
+        key="last_answered_by",
+        name="Last Answered By",
+        icon="mdi:phone-check",
+        value_fn=lambda c: c.last_answered_by,
     ),
 )
 
@@ -73,6 +80,15 @@ DIAGNOSTIC_DESCRIPTIONS: tuple[DoorbellSensorDescription, ...] = (
     ),
 )
 
+# Only added when an indoor monitor MQTT sensor is configured
+MONITOR_DESCRIPTION = DoorbellSensorDescription(
+    key="diag_monitor_state",
+    name="Indoor Monitor State",
+    icon="mdi:monitor-dashboard",
+    entity_category=EntityCategory.DIAGNOSTIC,
+    value_fn=lambda c: c.monitor_state,
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -80,10 +96,13 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: DoorbellCoordinator = hass.data[DOMAIN][entry.entry_id]
+    descriptions = [*SENSOR_DESCRIPTIONS, *DIAGNOSTIC_DESCRIPTIONS]
+    if entry.data.get(CONF_MONITOR_STATE_ENTITY):
+        descriptions.append(MONITOR_DESCRIPTION)
     async_add_entities(
         [
             DoorbellSensor(coordinator, entry, desc)
-            for desc in (*SENSOR_DESCRIPTIONS, *DIAGNOSTIC_DESCRIPTIONS)
+            for desc in descriptions
         ] + [BehaviorSummarySensor(coordinator, entry)]
     )
 

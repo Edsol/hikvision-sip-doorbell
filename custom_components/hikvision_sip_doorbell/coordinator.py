@@ -49,6 +49,7 @@ from .const import (
     CONF_INTERNAL_EXTENSION,
     CONF_INTERNAL_FALLBACK,
     CONF_MODE_PHONE_MAP,
+    CONF_MONITOR_STATE_ENTITY,
     CONF_SIP_DOMAIN,
     CONF_SIP_TRUNK,
     DEACTIVATED_BEHAVIOR_OPTIONS,
@@ -94,6 +95,7 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         self._internal_fallback: str = entry.data.get(CONF_INTERNAL_FALLBACK, DEFAULT_INTERNAL_FALLBACK)
         self._deactivated_behavior: str = entry.data.get(CONF_DEACTIVATED_BEHAVIOR, DEFAULT_DEACTIVATED_BEHAVIOR)
         self._call_state_entity: str = entry.data.get(CONF_CALL_STATE_ENTITY, "")
+        self._monitor_state_entity: str = entry.data.get(CONF_MONITOR_STATE_ENTITY, "")
 
         self._storage: Store = Store(
             hass, STORAGE_VERSION, STORAGE_KEY_TPL.format(entry_id=entry.entry_id)
@@ -103,6 +105,8 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         # Runtime state
         self.mode: str = DOORBELL_MODES[0]
         self.call_state: str = "idle"
+        self.monitor_state: str = "unknown"   # mirrored from the optional monitor MQTT sensor
+        self.last_answered_by: str = "none"   # extension that picked up the last call
 
     # ── Config properties (exposed to diagnostic sensors) ─────────────────────
 
@@ -221,6 +225,7 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         """Load persisted state, write routing to AstDB, subscribe to call_state sensor."""
         await self._async_load_state()
         self._async_subscribe_call_state()
+        self._async_subscribe_monitor_state()
         self.hass.async_create_task(self._async_write_routing_db())
         if self._sip_domain == DEFAULT_SIP_DOMAIN:
             self.hass.async_create_task(self._async_discover_sip_domain(force=False))
@@ -243,6 +248,17 @@ class DoorbellCoordinator(DataUpdateCoordinator):
                     client.remove_event_listener(self._ami_hangup_listener)
                 except Exception:
                     pass
+
+    def _ext_from_channel(self, channel: str) -> str:
+        """Map an Asterisk channel name to one of our internal extensions.
+
+        'PJSIP/6003-0000000b' → '6003'. Returns '' for channels that belong to
+        no configured indoor extension (trunk legs, Local/ test channels).
+        """
+        for ext in self.all_internal_exts:
+            if channel.startswith(f"PJSIP/{ext}-"):
+                return ext
+        return ""
 
     async def _async_subscribe_ami_call_events(self) -> None:
         """Listen to Asterisk AMI BridgeEnter/Hangup to update call_state when answered via SIP.
@@ -274,8 +290,13 @@ class DoorbellCoordinator(DataUpdateCoordinator):
             """BridgeEnter fires for each leg — we only care when doorbell is involved."""
             keys = getattr(event, "keys", {}) if not isinstance(event, dict) else event
             channel = keys.get("Channel", "")
-            # Doorbell channel contains its extension number
+            # The answering leg enters the same bridge: record which extension it is.
             if doorbell_ext not in channel:
+                answered = self._ext_from_channel(channel)
+                if answered and self.call_state in ("ringing", "answered"):
+                    self.last_answered_by = answered
+                    _LOGGER.info("AMI BridgeEnter: call answered by extension %s", answered)
+                    self.hass.loop.call_soon_threadsafe(self.async_update_listeners)
                 return
             if self.call_state != "ringing":
                 return
@@ -293,6 +314,7 @@ class DoorbellCoordinator(DataUpdateCoordinator):
                 return
             _LOGGER.info("AMI Hangup detected for doorbell — updating call_state to idle")
             self.call_state = "idle"
+            self.last_answered_by = "none"
             self.hass.loop.call_soon_threadsafe(self.async_update_listeners)
 
         self._ami_bridge_listener = _on_bridge_enter
@@ -607,6 +629,35 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         )
         _LOGGER.info("Tracking call state via %s", self._call_state_entity)
 
+    @callback
+    def _async_subscribe_monitor_state(self) -> None:
+        """Mirror an indoor monitor's MQTT call_state sensor, when configured.
+
+        Diagnostics only: the monitor is rung through Asterisk like any other
+        endpoint, so this never feeds into routing decisions.
+        """
+        if not self._monitor_state_entity:
+            return
+
+        @callback
+        def _on_monitor_state(event: Event) -> None:
+            new_state = event.data.get("new_state")
+            if new_state is None:
+                return
+            self.monitor_state = new_state.state.strip()
+            self.async_update_listeners()
+
+        current = self.hass.states.get(self._monitor_state_entity)
+        if current is not None:
+            self.monitor_state = current.state.strip()
+
+        self._unsub_listeners.append(
+            async_track_state_change_event(
+                self.hass, [self._monitor_state_entity], _on_monitor_state
+            )
+        )
+        _LOGGER.info("Tracking indoor monitor state via %s", self._monitor_state_entity)
+
     # ── Persistence ────────────────────────────────────────────────────────────
 
     async def _async_load_state(self) -> None:
@@ -638,6 +689,9 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         self._internal_ext = entry.data.get(CONF_INTERNAL_EXTENSION, self._internal_ext)
         self._extra_internal_exts = list(
             entry.data.get(CONF_EXTRA_INTERNAL_EXTENSIONS, self._extra_internal_exts)
+        )
+        self._monitor_state_entity = entry.data.get(
+            CONF_MONITOR_STATE_ENTITY, self._monitor_state_entity
         )
         self._sip_trunk = entry.data.get(CONF_SIP_TRUNK, self._sip_trunk)
         self._sip_domain = entry.data.get(CONF_SIP_DOMAIN, self._sip_domain)

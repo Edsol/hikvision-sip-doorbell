@@ -1,6 +1,6 @@
 {
   "name": "hikvision-doorbell-card",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "scripts": {
     "build": "node esbuild.config.mjs",

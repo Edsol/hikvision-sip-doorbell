@@ -33,6 +33,7 @@
           "doorbell_extension": "Interno SIP del videocitofono (seleziona da Asterisk)",
           "internal_extension": "Interno SIP da chiamare in casa (seleziona da Asterisk)",
           "extra_internal_extensions": "Interni SIP aggiuntivi (squillano insieme)",
+          "monitor_state_entity": "Sensore MQTT del monitor interno (opzionale, diagnostica)",
           "sip_trunk": "Trunk SIP per chiamate esterne (seleziona da Asterisk)",
           "sip_domain": "Dominio VoIP per chiamate esterne (es. sip.esempio.it)"
         },
@@ -66,6 +67,7 @@
           "doorbell_extension": "Interno SIP del videocitofono",
           "internal_extension": "Interno SIP da chiamare in casa",
           "extra_internal_extensions": "Interni SIP aggiuntivi (squillano insieme)",
+          "monitor_state_entity": "Sensore MQTT del monitor interno (opzionale, diagnostica)",
           "sip_trunk": "Trunk SIP per chiamate esterne",
           "sip_domain": "Dominio VoIP per chiamate esterne"
         }
