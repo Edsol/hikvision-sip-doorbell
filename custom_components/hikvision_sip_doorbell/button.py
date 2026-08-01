@@ -27,6 +27,7 @@ async def async_setup_entry(
     async_add_entities([
         DiscoverSipDomainButton(coordinator, entry),
         SimulateRingButton(coordinator, entry),
+        TestRingButton(coordinator, entry),
         SyncRoutingDbButton(coordinator, entry),
     ])
 
@@ -79,6 +80,36 @@ class SimulateRingButton(ButtonEntity):
         await asyncio.sleep(2)
         self._coordinator.call_state = "idle"
         self._coordinator.async_update_listeners()
+
+
+class TestRingButton(ButtonEntity):
+    """Button to originate a real test call through the Asterisk dialplan.
+
+    Unlike SimulateRingButton (which only moves the UI state), this asks
+    Asterisk to enter the [from-door] context exactly as a real doorbell press
+    would, so the configured routing actually rings the indoor extensions.
+    No video is carried: the originating leg is synthetic, with no camera
+    behind it.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:phone-ring"
+    _attr_name = "Test Ring (real call)"
+
+    def __init__(self, coordinator: DoorbellCoordinator, entry: ConfigEntry) -> None:
+        device_id = entry.data[CONF_DEVICE_ID]
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{DOMAIN}_{device_id}_test_ring"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_id)},
+            name="Hikvision SIP Doorbell",
+            manufacturer="Hikvision",
+            model=entry.data.get("model", "DS-KV6113-WPE1(C)"),
+        )
+
+    async def async_press(self) -> None:
+        _LOGGER.info("Test ring: originating call into the doorbell dialplan")
+        await self._coordinator.async_originate_test_ring()
 
 
 class SyncRoutingDbButton(ButtonEntity):

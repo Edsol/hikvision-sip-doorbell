@@ -49,7 +49,8 @@ Call state is tracked via `async_track_state_change_event` on the existing HA MQ
 | `sensor.py` | `sensor.doorbell_extension`, `sensor.internal_extension`, `sensor.sip_trunk`, `sensor.sip_domain` | `EntityCategory.DIAGNOSTIC` |
 | `sensor.py` | `sensor.behavior_summary` | `EntityCategory.DIAGNOSTIC` — human-readable description of current routing behaviour |
 | `button.py` | `button.discover_sip_domain` | `EntityCategory.DIAGNOSTIC` — manual SIP domain re-discovery |
-| `button.py` | `button.simulate_ring` | `EntityCategory.DIAGNOSTIC` — simulates ringing/idle state transition |
+| `button.py` | `button.simulate_ring` | `EntityCategory.DIAGNOSTIC` — simulates ringing/idle state transition (UI only, no Asterisk call) |
+| `button.py` | `button.test_ring` | `EntityCategory.DIAGNOSTIC` — originates a real call into `[from-door]` via AMI Originate; exercises routing without pressing the physical button (no video: synthetic leg) |
 | `button.py` | `button.sync_routing_db` | `EntityCategory.DIAGNOSTIC` — manually re-writes AstDB routing |
 | `config_flow.py` | — | Single-step config flow + menu-driven options flow |
 
@@ -63,6 +64,7 @@ Call state is tracked via `async_track_state_change_event` on the existing HA MQ
     "call_state_entity": "sensor.myfrontdoor_call_state",
     "doorbell_extension": "6001",
     "internal_extension": "6002",
+    "extra_internal_extensions": ["6003"],  # rung in parallel with the primary
     "sip_trunk": "PJSIP/my-trunk/",
     "sip_domain": "sip.example.com",        # auto-discovered, starts as placeholder
     "enabled_modes": ["at_home", "away_from_home", "deactivated"],  # always includes deactivated
@@ -86,6 +88,7 @@ Call state is tracked via `async_track_state_change_event` on the existing HA MQ
 | `device_id` / `call_state_entity` | MQTT sensor (integration: mqtt) | `_device_id_from_mqtt_entity()` |
 | `doorbell_extension` | Asterisk binary_sensor | `_endpoint_name_from_entity()` → e.g. `6001` |
 | `internal_extension` | Asterisk binary_sensor | same → e.g. `6002` |
+| `extra_internal_extensions` | Asterisk binary_sensor (multiple) | same, list → e.g. `["6003"]`; primary is filtered out |
 | `sip_trunk` | Asterisk binary_sensor | stored as `PJSIP/<name>/` |
 | `sip_domain` | Free text | Default `sip.example.com` — auto-discovered post-setup |
 
@@ -126,12 +129,12 @@ Human-readable string updated on every coordinator state change. Examples:
 
 | Mode | Condition | Channel written |
 |---|---|---|
-| `at_home` | 6002 registered | `PJSIP/6002` |
-| `at_home` | not registered, fallback=wait | `PJSIP/6002` |
+| `at_home` | ≥1 internal registered | `PJSIP/<reg1>&PJSIP/<reg2>…` (only registered ones) |
+| `at_home` | none registered, fallback=wait | `PJSIP/6002` |
 | `at_home` | not registered, fallback=call_external | `<trunk>sip:<phone>@<domain>` |
 | `at_home` | not registered, fallback=none | `""` |
 | `away_from_home` / `vacation` | phone available | `<trunk>sip:<phone>@<domain>` |
-| `away_from_home` / `vacation` | no phone | `PJSIP/6002` (fallback with warning) |
+| `away_from_home` / `vacation` | no phone | internal ring group (fallback with warning) |
 | `deactivated` | — | `""` |
 
 AstDB write is triggered by: mode change, phone entity selection, fallback change, options update, HA startup. At startup, retries up to 3× with 5s delay if the Asterisk service isn't ready yet.

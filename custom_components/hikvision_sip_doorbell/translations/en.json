@@ -32,6 +32,7 @@
           "device_id": "Doorbell MQTT sensor (select the Call state sensor)",
           "doorbell_extension": "Doorbell SIP endpoint (select from Asterisk)",
           "internal_extension": "Indoor SIP endpoint to ring (select from Asterisk)",
+          "extra_internal_extensions": "Additional indoor SIP endpoints (ring together)",
           "sip_trunk": "SIP trunk for external calls (select from Asterisk)",
           "sip_domain": "VoIP domain for external calls (e.g. sip.example.com)"
         },
@@ -64,6 +65,7 @@
         "data": {
           "doorbell_extension": "Doorbell SIP endpoint",
           "internal_extension": "Indoor SIP endpoint",
+          "extra_internal_extensions": "Additional indoor SIP endpoints (ring together)",
           "sip_trunk": "SIP trunk for external calls",
           "sip_domain": "VoIP domain for external calls"
         }

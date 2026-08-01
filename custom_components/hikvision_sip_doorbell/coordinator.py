@@ -45,6 +45,7 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_DOORBELL_EXTENSION,
     CONF_ENABLED_MODES,
+    CONF_EXTRA_INTERNAL_EXTENSIONS,
     CONF_INTERNAL_EXTENSION,
     CONF_INTERNAL_FALLBACK,
     CONF_MODE_PHONE_MAP,
@@ -82,6 +83,9 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         self._device_id: str = entry.data[CONF_DEVICE_ID]
         self._doorbell_ext: str = entry.data.get(CONF_DOORBELL_EXTENSION, DEFAULT_DOORBELL_EXTENSION)
         self._internal_ext: str = entry.data[CONF_INTERNAL_EXTENSION]
+        self._extra_internal_exts: list[str] = list(
+            entry.data.get(CONF_EXTRA_INTERNAL_EXTENSIONS, [])
+        )
         self._sip_trunk: str = entry.data[CONF_SIP_TRUNK]
         self._sip_domain: str = entry.data.get(CONF_SIP_DOMAIN, DEFAULT_SIP_DOMAIN)
         self._enabled_modes: list[str] = list(entry.data.get(CONF_ENABLED_MODES, DOORBELL_MODES))
@@ -192,9 +196,12 @@ class DoorbellCoordinator(DataUpdateCoordinator):
                 return f"Chiamerà il numero esterno {phone}{suffix} via trunk SIP." if it else f"Will call {phone}{suffix} via SIP trunk."
             return f"Modalità {mode} attiva ma il numero selezionato non è disponibile." if it else f"Mode {mode} active but selected number is unavailable."
         # at_home (or any internal mode)
-        registered = self._is_internal_ext_registered()
-        if registered:
-            return f"Chiamerà l'interno {ext}." if it else f"Will ring indoor extension {ext}."
+        reg_exts = self._registered_internal_exts()
+        if reg_exts:
+            joined = ", ".join(reg_exts)
+            if len(reg_exts) > 1:
+                return f"Chiamerà gli interni {joined} insieme." if it else f"Will ring indoor extensions {joined} together."
+            return f"Chiamerà l'interno {joined}." if it else f"Will ring indoor extension {joined}."
         fallback = self._internal_fallback
         if fallback == "call_external":
             phone = self.number_to_call
@@ -419,11 +426,11 @@ class DoorbellCoordinator(DataUpdateCoordinator):
 
     # ── AstDB routing ─────────────────────────────────────────────────────────
 
-    def _is_internal_ext_registered(self) -> bool:
-        """Check if the internal extension is currently registered in Asterisk."""
+    def _is_ext_registered(self, ext: str) -> bool:
+        """Check if a given PJSIP extension is currently registered in Asterisk."""
         from homeassistant.helpers import entity_registry as er
         ent_reg = er.async_get(self.hass)
-        suffix = f"{self._internal_ext}_registered"
+        suffix = f"{ext}_registered"
         for entry in ent_reg.entities.values():
             if (
                 entry.platform == "asterisk"
@@ -434,6 +441,36 @@ class DoorbellCoordinator(DataUpdateCoordinator):
                 if state is not None:
                     return state.state == "on"
         return False
+
+    @property
+    def all_internal_exts(self) -> list[str]:
+        """Primary internal extension plus any extras, de-duplicated, order preserved."""
+        exts = [self._internal_ext, *self._extra_internal_exts]
+        return list(dict.fromkeys(e for e in exts if e))
+
+    def _registered_internal_exts(self) -> list[str]:
+        """Subset of internal extensions currently registered in Asterisk."""
+        return [e for e in self.all_internal_exts if self._is_ext_registered(e)]
+
+    def _is_internal_ext_registered(self) -> bool:
+        """True if at least one configured internal extension is registered."""
+        return bool(self._registered_internal_exts())
+
+    def _internal_dial(self) -> tuple[str, str]:
+        """Return (channel, endpoint) for ringing the indoor extensions.
+
+        Rings every registered extension in parallel via Asterisk's '&' syntax.
+        `endpoint` is a single registered extension: the dialplan availability
+        guard uses DEVICE_STATE() on it, which accepts only one endpoint name.
+        Falls back to all configured extensions when none is registered, so the
+        'wait' fallback keeps its original meaning.
+        """
+        exts = self._registered_internal_exts() or self.all_internal_exts
+        channel = "&".join(f"PJSIP/{e}" for e in exts)
+        # Guard on a registered extension when there is one; '' skips the check.
+        registered = self._registered_internal_exts()
+        endpoint = registered[0] if registered else ""
+        return channel, endpoint
 
     def _compute_channel(self) -> tuple[str, str]:
         """Return (channel, endpoint) for the current mode/state.
@@ -451,7 +488,7 @@ class DoorbellCoordinator(DataUpdateCoordinator):
 
         if route == "internal":
             if self._is_internal_ext_registered():
-                return f"PJSIP/{self._internal_ext}", self._internal_ext
+                return self._internal_dial()
             fallback = self._internal_fallback
             if fallback == "call_external":
                 phone = self.number_to_call
@@ -472,7 +509,7 @@ class DoorbellCoordinator(DataUpdateCoordinator):
                 "falling back to internal",
                 self.mode,
             )
-            return f"PJSIP/{self._internal_ext}", self._internal_ext
+            return self._internal_dial()
         return f"{self._sip_trunk}sip:{phone}@{self._sip_domain}", ""
 
     async def _async_write_routing_db(self, _retry: int = 0) -> None:
@@ -513,6 +550,34 @@ class DoorbellCoordinator(DataUpdateCoordinator):
                 )
         except Exception as exc:
             _LOGGER.error("AstDB DBPut failed: %s", exc)
+
+    async def async_originate_test_ring(self) -> None:
+        """Originate a call into the doorbell dialplan, as a real ring would.
+
+        Lets the configured routing be exercised without pressing the physical
+        button. The originating leg is synthetic, so no video is carried — this
+        verifies routing and ringing only.
+        """
+        if not self.hass.services.has_service("asterisk", "send_action"):
+            _LOGGER.warning("Test ring: asterisk service unavailable")
+            return
+        # Local channel into [from-door]; the extension only has to match _X.
+        try:
+            await self.hass.services.async_call(
+                "asterisk",
+                "send_action",
+                {"action": "Originate", "parameters": {
+                    "Channel": f"Local/{self._doorbell_ext}@from-door",
+                    "Application": "Wait",
+                    "Data": "30",
+                    "CallerID": "Doorbell Test",
+                    "Async": "true",
+                }},
+                blocking=False,
+            )
+            _LOGGER.info("Test ring originated into [from-door]")
+        except Exception as exc:
+            _LOGGER.error("Test ring failed: %s", exc)
 
     # ── State tracking ────────────────────────────────────────────────────────
 
@@ -571,6 +636,9 @@ class DoorbellCoordinator(DataUpdateCoordinator):
         """Refresh runtime config after options flow update and sync AstDB."""
         self._doorbell_ext = entry.data.get(CONF_DOORBELL_EXTENSION, self._doorbell_ext)
         self._internal_ext = entry.data.get(CONF_INTERNAL_EXTENSION, self._internal_ext)
+        self._extra_internal_exts = list(
+            entry.data.get(CONF_EXTRA_INTERNAL_EXTENSIONS, self._extra_internal_exts)
+        )
         self._sip_trunk = entry.data.get(CONF_SIP_TRUNK, self._sip_trunk)
         self._sip_domain = entry.data.get(CONF_SIP_DOMAIN, self._sip_domain)
         self._internal_fallback = entry.data.get(CONF_INTERNAL_FALLBACK, self._internal_fallback)

@@ -24,6 +24,7 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_DOORBELL_EXTENSION,
     CONF_ENABLED_MODES,
+    CONF_EXTRA_INTERNAL_EXTENSIONS,
     CONF_INTERNAL_EXTENSION,
     CONF_MODE_PHONE_MAP,
     CONF_SIP_DOMAIN,
@@ -49,6 +50,13 @@ _ASTERISK_ENDPOINT_SELECTOR = EntitySelector(
     EntitySelectorConfig(
         filter=EntityFilterSelectorConfig(integration="asterisk", domain="binary_sensor"),
         multiple=False,
+    )
+)
+
+_ASTERISK_ENDPOINTS_SELECTOR = EntitySelector(
+    EntitySelectorConfig(
+        filter=EntityFilterSelectorConfig(integration="asterisk", domain="binary_sensor"),
+        multiple=True,
     )
 )
 
@@ -235,6 +243,21 @@ class HikvisionSipDoorbellOptionsFlow(config_entries.OptionsFlow):
                     else:
                         user_input[field] = resolved
 
+            extras: list[str] = []
+            for value in user_input.get(CONF_EXTRA_INTERNAL_EXTENSIONS, []) or []:
+                if value and "." in value:
+                    resolved = _endpoint_name_from_entity(self.hass, value)
+                    if resolved is None:
+                        self._errors[CONF_EXTRA_INTERNAL_EXTENSIONS] = "endpoint_not_found"
+                        continue
+                    value = resolved
+                extras.append(value)
+            # the primary extension is always rung; keep extras free of duplicates
+            primary = user_input.get(CONF_INTERNAL_EXTENSION, "")
+            user_input[CONF_EXTRA_INTERNAL_EXTENSIONS] = [
+                e for e in dict.fromkeys(extras) if e != primary
+            ]
+
             trunk_value = user_input.get(CONF_SIP_TRUNK, "")
             if trunk_value and "." in trunk_value:
                 resolved = _endpoint_name_from_entity(self.hass, trunk_value)
@@ -260,12 +283,17 @@ class HikvisionSipDoorbellOptionsFlow(config_entries.OptionsFlow):
             _trunk_entity_from_value(self.hass, data.get(CONF_SIP_TRUNK, ""))
             or data.get(CONF_SIP_TRUNK, DEFAULT_SIP_TRUNK)
         )
+        extras_default = [
+            _entity_from_endpoint_name(self.hass, ext) or ext
+            for ext in data.get(CONF_EXTRA_INTERNAL_EXTENSIONS, [])
+        ]
 
         return self.async_show_form(
             step_id="sip_settings",
             data_schema=vol.Schema({
                 vol.Required(CONF_DOORBELL_EXTENSION, default=doorbell_default): _ASTERISK_ENDPOINT_SELECTOR,
                 vol.Required(CONF_INTERNAL_EXTENSION, default=internal_default): _ASTERISK_ENDPOINT_SELECTOR,
+                vol.Optional(CONF_EXTRA_INTERNAL_EXTENSIONS, default=extras_default): _ASTERISK_ENDPOINTS_SELECTOR,
                 vol.Required(CONF_SIP_TRUNK, default=trunk_default): _ASTERISK_ENDPOINT_SELECTOR,
                 vol.Required(CONF_SIP_DOMAIN, default=data.get(CONF_SIP_DOMAIN, DEFAULT_SIP_DOMAIN)): str,
             }),
